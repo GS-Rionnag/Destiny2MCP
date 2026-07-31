@@ -46,15 +46,34 @@ Read-only live test: looks up Gjallarhorn in the manifest, fetches your account,
 
 ## Connect ChatGPT web
 
-ChatGPT connectors need a public URL, so run a tunnel:
+ChatGPT can't reach localhost directly. The supported path is OpenAI's [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels): a daemon on your machine makes an outbound connection to OpenAI, and ChatGPT talks to your server through it. No public URL, no exposed port.
 
-```bash
-cloudflared tunnel --url http://localhost:7777
-```
+Requires a ChatGPT plan with developer mode (Plus/Pro/Business) and an OpenAI platform account.
 
-Then in ChatGPT: **Settings → Connectors → Advanced → Developer mode**, add a connector with URL `https://<tunnel-host>/mcp`, no authentication.
+1. **Enable developer mode**: ChatGPT → **Settings → Apps & Connectors → Advanced settings → Developer mode**.
+2. **Create a tunnel**: [platform.openai.com → Settings → Tunnels](https://platform.openai.com/settings/organization/tunnels) → Create tunnel. Copy the `tunnel_id`.
+3. **Create a runtime API key**: [Runtime API keys](https://platform.openai.com/settings/organization/api-keys), with Tunnels **Read + Use** permissions. This key only authenticates the tunnel — it doesn't spend model credits.
+4. **Install `tunnel-client`** on the machine running this server: download the binary for your platform from [openai/tunnel-client releases](https://github.com/openai/tunnel-client/releases/latest) and put it on your PATH.
+5. **Configure and run** (with `npm start` already running):
 
-**Security note:** anyone who has the tunnel URL controls your Destiny inventory. Protect it (e.g. Cloudflare Access) or keep the URL secret and rotate it regularly.
+   ```bash
+   export CONTROL_PLANE_API_KEY="sk-..."   # the runtime key
+
+   tunnel-client init \
+     --sample sample_mcp_remote_no_auth \
+     --profile destiny2 \
+     --tunnel-id tunnel_YOUR_ID \
+     --mcp-server-url http://localhost:7777/mcp
+
+   tunnel-client run --profile destiny2
+   ```
+
+   `tunnel-client doctor --profile destiny2` flags a failed `oauth_metadata` check — expected, this server has no OAuth layer; plain MCP servers still reach ready. Confirm with `curl http://127.0.0.1:8080/readyz` → `ready`.
+6. **Add the plugin**: ChatGPT → **Plugins → + → Connection: Tunnel** → select your tunnel. Authentication: **None**. Give it a name and a capability-rich description (the model uses the description to decide when to call your tools).
+
+Keep `tunnel-client run` alive alongside `npm start` (e.g. systemd services) — ChatGPT needs both for every call.
+
+Alternative without an OpenAI platform account: expose the server publicly with `cloudflared tunnel --url http://localhost:7777` and add the URL as a connector — but then anyone with the URL controls your Destiny inventory; protect it or rotate it regularly.
 
 ## Connect Claude
 
