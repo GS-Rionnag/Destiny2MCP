@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { openManifestFile, hashToId } from '../src/manifest.js';
-import { itemSummary, formatSales } from '../src/tools/read.js';
+import { itemSummary, formatSales, parseBungieName } from '../src/tools/read.js';
 import { tool } from '../src/tools/util.js';
 
 beforeAll(() => {
@@ -47,6 +47,15 @@ describe('formatSales', () => {
     expect(formatSales(sales)).toEqual([
       { name: 'Test Rifle', itemHash: 999, vendorItemIndex: 5, costs: ['25 Test Rifle'] },
     ]);
+  });
+});
+
+describe('parseBungieName', () => {
+  it('splits on the last #', () => {
+    expect(parseBungieName('Cool#Guy#1234')).toEqual({ displayName: 'Cool#Guy', displayNameCode: 1234 });
+  });
+  it('throws readable error without code', () => {
+    expect(() => parseBungieName('NoCode')).toThrowError(/Name#1234/);
   });
 });
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
-import { defName, getDef } from '../manifest.js';
+import { defName, getDef, searchDefs } from '../manifest.js';
 import { tool } from './util.js';
 
 export function itemSummary(item: any, instances?: Record<string, any>) {
@@ -25,6 +25,13 @@ export function formatSales(sales: Record<string, any>) {
     vendorItemIndex: s.vendorItemIndex,
     costs: (s.costs ?? []).map((c: any) => `${c.quantity} ${defName('DestinyInventoryItemDefinition', c.itemHash)}`),
   }));
+}
+
+export function parseBungieName(full: string): { displayName: string; displayNameCode: number } {
+  const i = full.lastIndexOf('#');
+  const code = Number(full.slice(i + 1));
+  if (i < 1 || !Number.isInteger(code)) throw new Error(`Bungie names look like "Name#1234", got "${full}"`);
+  return { displayName: full.slice(0, i), displayNameCode: code };
 }
 
 const profilePath = async () => {
@@ -189,4 +196,88 @@ export function registerReadTools(server: McpServer): void {
       })
       .filter(Boolean);
   }));
+
+  server.registerTool('get_activity_history', {
+    description: 'Recent completed activities for a character. mode: 0=all, 5=PvP, 7=PvE, 4=raid, 82=dungeon, 84=Trials, 46=GM nightfall.',
+    inputSchema: z.object({
+      character_id: z.string(),
+      mode: z.number().int().default(0),
+      count: z.number().int().min(1).max(50).default(10),
+    }),
+  }, tool(async ({ character_id, mode, count }) => {
+    const a = await getAccount();
+    const r = await bungieFetch<any>(
+      `/Destiny2/${a.membershipType}/Account/${a.membershipId}/Character/${character_id}/Stats/Activities/`,
+      { auth: true, query: { mode, count, page: 0 } },
+    );
+    return (r.activities ?? []).map((act: any) => ({
+      date: act.period,
+      activity: defName('DestinyActivityDefinition', act.activityDetails.directorActivityHash),
+      completed: act.values.completed?.basic?.displayValue,
+      kills: act.values.kills?.basic?.value,
+      deaths: act.values.deaths?.basic?.value,
+      kd: act.values.killsDeathsRatio?.basic?.displayValue,
+      standing: act.values.standing?.basic?.displayValue,
+    }));
+  }));
+
+  server.registerTool('get_stats', {
+    description: 'Lifetime account stats, split PvE / PvP: kills, K/D, activities cleared, time played, and more.',
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const a = await getAccount();
+    const r = await bungieFetch<any>(`/Destiny2/${a.membershipType}/Account/${a.membershipId}/Stats/`, {
+      auth: true, query: { groups: 'General' },
+    });
+    const prune = (side: any) =>
+      Object.fromEntries(Object.entries<any>(side?.allTime ?? {}).map(([k, v]) => [k, v.basic.displayValue]));
+    return {
+      pve: prune(r.mergedAllCharacters?.results?.allPvE),
+      pvp: prune(r.mergedAllCharacters?.results?.allPvP),
+    };
+  }));
+
+  server.registerTool('get_clan', {
+    description: "The account's clan: name, motto, member count, online members.",
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const a = await getAccount();
+    const g = await bungieFetch<any>(`/GroupV2/User/${a.membershipType}/${a.membershipId}/0/1/`, { auth: true });
+    const group = g.results?.[0]?.group;
+    if (!group) return 'Not in a clan.';
+    const members = await bungieFetch<any>(`/GroupV2/${group.groupId}/Members/`);
+    return {
+      name: group.name,
+      motto: group.motto,
+      about: group.about,
+      memberCount: group.memberCount,
+      members: (members.results ?? []).map((m: any) => ({
+        name: `${m.destinyUserInfo.bungieGlobalDisplayName}#${m.destinyUserInfo.bungieGlobalDisplayNameCode}`,
+        online: m.isOnline,
+      })),
+    };
+  }));
+
+  server.registerTool('search_player', {
+    description: 'Find any player by full Bungie name ("Guardian#1234") → their membership ids.',
+    inputSchema: z.object({ bungie_name: z.string() }),
+  }, tool(async ({ bungie_name }) => {
+    const r = await bungieFetch<any>('/Destiny2/SearchDestinyPlayerByBungieName/-1/', {
+      method: 'POST', body: parseBungieName(bungie_name),
+    });
+    return (r ?? []).map((p: any) => ({
+      membershipType: p.membershipType,
+      membershipId: p.membershipId,
+      name: `${p.bungieGlobalDisplayName}#${p.bungieGlobalDisplayNameCode}`,
+    }));
+  }));
+
+  server.registerTool('search_manifest', {
+    description: 'Look up any Destiny definition by name → hash. Items by default; set table for perks (DestinySandboxPerkDefinition), activities (DestinyActivityDefinition), etc.',
+    inputSchema: z.object({
+      query: z.string(),
+      table: z.string().default('DestinyInventoryItemDefinition'),
+      limit: z.number().int().min(1).max(100).default(25),
+    }),
+  }, tool(async ({ query, table, limit }) => searchDefs(query, table, limit)));
 }
