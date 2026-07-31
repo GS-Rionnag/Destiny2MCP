@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { openManifestFile, hashToId } from '../src/manifest.js';
-import { itemSummary } from '../src/tools/read.js';
+import { itemSummary, formatSales } from '../src/tools/read.js';
 import { tool } from '../src/tools/util.js';
 
 beforeAll(() => {
@@ -36,6 +36,17 @@ describe('itemSummary', () => {
 
   it('falls back to #hash when def missing', () => {
     expect(itemSummary({ itemHash: 1, quantity: 3 }).name).toBe('#1');
+  });
+});
+
+describe('formatSales', () => {
+  it('resolves item and cost names', () => {
+    const sales = {
+      '5': { itemHash: 999, vendorItemIndex: 5, costs: [{ itemHash: 999, quantity: 25 }] },
+    };
+    expect(formatSales(sales)).toEqual([
+      { name: 'Test Rifle', itemHash: 999, vendorItemIndex: 5, costs: ['25 Test Rifle'] },
+    ]);
   });
 });
 

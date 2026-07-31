@@ -18,6 +18,15 @@ export function itemSummary(item: any, instances?: Record<string, any>) {
   };
 }
 
+export function formatSales(sales: Record<string, any>) {
+  return Object.values<any>(sales).map((s) => ({
+    name: defName('DestinyInventoryItemDefinition', s.itemHash),
+    itemHash: s.itemHash,
+    vendorItemIndex: s.vendorItemIndex,
+    costs: (s.costs ?? []).map((c: any) => `${c.quantity} ${defName('DestinyInventoryItemDefinition', c.itemHash)}`),
+  }));
+}
+
 const profilePath = async () => {
   const a = await getAccount();
   return `/Destiny2/${a.membershipType}/Profile/${a.membershipId}`;
@@ -116,5 +125,68 @@ export function registerReadTools(server: McpServer): void {
         enabled: s.isEnabled,
       })),
     };
+  }));
+
+  server.registerTool('get_vendors', {
+    description: 'List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock.',
+    inputSchema: z.object({ character_id: z.string().describe('Vendors are per-character; from get_profile') }),
+  }, tool(async ({ character_id }) => {
+    const r = await bungieFetch<any>(`${await profilePath()}/Character/${character_id}/Vendors/`, {
+      auth: true, query: { components: '400' },
+    });
+    return Object.values<any>(r.vendors.data)
+      .map((v) => ({
+        vendorHash: v.vendorHash,
+        name: defName('DestinyVendorDefinition', v.vendorHash),
+        nextRefresh: v.nextRefreshDate,
+        enabled: v.enabled,
+      }))
+      .filter((v) => !v.name.startsWith('#'));
+  }));
+
+  server.registerTool('get_vendor_items', {
+    description: "One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386).",
+    inputSchema: z.object({ character_id: z.string(), vendor_hash: z.number().int() }),
+  }, tool(async ({ character_id, vendor_hash }) => {
+    const r = await bungieFetch<any>(`${await profilePath()}/Character/${character_id}/Vendors/${vendor_hash}/`, {
+      auth: true, query: { components: '402' },
+    });
+    return {
+      vendor: defName('DestinyVendorDefinition', vendor_hash),
+      items: formatSales(r.sales?.data ?? {}),
+    };
+  }));
+
+  server.registerTool('get_loadouts', {
+    description: 'In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout.',
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const r = await bungieFetch<any>(`${await profilePath()}/`, { auth: true, query: { components: '206,200' } });
+    const chars = r.characters.data;
+    return Object.entries<any>(r.characterLoadouts?.data ?? {}).map(([cid, l]) => ({
+      characterId: cid,
+      class: defName('DestinyClassDefinition', chars[cid].classHash),
+      loadouts: l.loadouts.map((lo: any, i: number) => ({
+        loadoutIndex: i,
+        name: defName('DestinyLoadoutNameDefinition', lo.nameHash),
+        empty: !lo.items?.length,
+        itemInstanceIds: (lo.items ?? []).map((it: any) => it.itemInstanceId),
+      })),
+    }));
+  }));
+
+  server.registerTool('get_milestones', {
+    description: 'Current weekly milestones/activities across the game (public info, no character needed).',
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const r = await bungieFetch<any>('/Destiny2/Milestones/');
+    return Object.values<any>(r)
+      .map((m) => {
+        const def = getDef('DestinyMilestoneDefinition', m.milestoneHash);
+        return def?.displayProperties?.name
+          ? { name: def.displayProperties.name, description: def.displayProperties.description, ends: m.endDate }
+          : null;
+      })
+      .filter(Boolean);
   }));
 }
