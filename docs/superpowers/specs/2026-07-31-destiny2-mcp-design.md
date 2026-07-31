@@ -99,9 +99,10 @@ mods ✅, paid weapon perk rerolls ❌ (blocked for all third parties).
 ## Auth flow (one-time per user)
 
 1. User registers app at bungie.net/developer → API key, client id/secret.
-   OAuth redirect URL: `https://localhost:7777/callback`.
+   OAuth redirect URL: `https://localhost:7778/callback` (separate HTTPS
+   port — MCP stays plain HTTP on 7777; one port can't serve both).
 2. `npm run setup` → generates self-signed TLS cert (Bungie requires HTTPS
-   redirect), prints `https://localhost:7777/auth`.
+   redirect), prints `https://localhost:7778/auth`.
 3. User opens it, accepts the one-time browser cert warning, logs into
    Bungie, callback stores `tokens.json`.
 4. Thereafter fully automatic: access token refresh on expiry; clear warning
