@@ -54,10 +54,11 @@ export function searchDefs(query: string, table = 'DestinyInventoryItemDefinitio
     const name: string | undefined = d.displayProperties?.name;
     if (name && name.toLowerCase().includes(q)) {
       out.push({ hash: d.hash, name, type: d.itemTypeDisplayName, tier: d.inventory?.tierTypeName });
-      if (out.length >= limit) break;
     }
   }
-  return out;
+  out.sort((a, b) =>
+    Number(b.name.toLowerCase() === q) - Number(a.name.toLowerCase() === q) || a.name.length - b.name.length);
+  return out.slice(0, limit);
 }
 
 export function firstHash(table: string): number {
