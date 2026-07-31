@@ -116,7 +116,7 @@ export function registerReadTools(server: McpServer): void {
     inputSchema: z.object({ item_instance_id: z.string() }),
   }, tool(async ({ item_instance_id }) => {
     const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
-      auth: true, query: { components: '300,302,304,305' },
+      auth: true, query: { components: '300,302,304,305,307' },
     });
     const inst = r.instance?.data;
     return {

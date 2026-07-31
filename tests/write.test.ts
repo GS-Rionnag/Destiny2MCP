@@ -9,7 +9,9 @@ vi.mock('../src/manifest.js', () => ({
   searchDefs: vi.fn((q: string) => (q === 'Sunshot' ? [{ hash: 555, name: 'Sunshot' }] : [])),
   firstHash: vi.fn(() => 111),
   defName: vi.fn(() => 'X'),
-  getDef: vi.fn(() => undefined),
+  getDef: vi.fn((_t: string, hash: number) => hash === 777
+    ? { itemType: 16, displayProperties: { name: 'Gunslinger' }, talentGrid: { hudDamageType: 3 } }
+    : undefined),
 }));
 
 const { registerWriteTools, resolvePlugHash } = await import('../src/tools/write.js');
@@ -21,7 +23,8 @@ function capture() {
   return tools;
 }
 
-beforeEach(() => vi.mocked(bungieFetch).mockClear());
+// braces matter: mockClear() returns the mock, and vitest calls a function returned from beforeEach as a cleanup hook
+beforeEach(() => { vi.mocked(bungieFetch).mockClear(); });
 
 describe('write tools', () => {
   it('transfer_item posts correct body', async () => {
@@ -48,6 +51,29 @@ describe('write tools', () => {
   it('resolvePlugHash: numeric passthrough, unknown name throws readable', () => {
     expect(resolvePlugHash('12345')).toBe(12345);
     expect(() => resolvePlugHash('Nope Nothing')).toThrowError(/search_manifest/);
+  });
+
+  it('change_subclass matches by element, skips equip when already equipped, still sockets plugs', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) => {
+      if (path.includes('/Profile/')) return {
+        characterInventories: { data: { C1: { items: [] } } },
+        characterEquipment: { data: { C1: { items: [{ itemHash: 777, itemInstanceId: 'SUB1' }] } } },
+      } as any;
+      return {} as any;
+    });
+    const res = await capture().change_subclass({
+      character_id: 'C1', subclass_name: 'Solar', plugs: [{ socket_index: 2, plug: '555' }],
+    });
+    const paths = vi.mocked(bungieFetch).mock.calls.map(([p]) => p);
+    expect(paths).not.toContain('/Destiny2/Actions/Items/EquipItem/');
+    expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Items/InsertSocketPlugFree/', {
+      method: 'POST', auth: true,
+      body: {
+        plug: { socketIndex: 2, socketArrayType: 0, plugItemHash: 555 },
+        itemId: 'SUB1', characterId: 'C1', membershipType: 3,
+      },
+    });
+    expect(res.content[0].text).toContain('Already equipped');
   });
 
   it('set_lock_state posts state', async () => {

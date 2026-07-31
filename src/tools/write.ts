@@ -119,7 +119,7 @@ export function registerWriteTools(server: McpServer): void {
   }));
 
   server.registerTool('change_subclass', {
-    description: 'Equip a subclass by name (e.g. "Solar", "Prismatic") and optionally configure its super/aspects/fragments in one call. For plugs: first call get_item_details on the subclass instance to see socket indexes.',
+    description: 'Equip a subclass by element or name (e.g. "Solar", "Gunslinger", "Prismatic") and optionally configure its super/aspects/fragments in one call. For plugs: first call get_item_details on the subclass instance to see socket indexes.',
     inputSchema: z.object({
       character_id: z.string(),
       subclass_name: z.string(),
@@ -130,19 +130,25 @@ export function registerWriteTools(server: McpServer): void {
     const r = await bungieFetch<any>(`/Destiny2/${a.membershipType}/Profile/${a.membershipId}/`, {
       auth: true, query: { components: '201,205' },
     });
-    const items = [
-      ...(r.characterInventories?.data?.[character_id]?.items ?? []),
-      ...(r.characterEquipment?.data?.[character_id]?.items ?? []),
-    ];
     const q = subclass_name.toLowerCase();
+    // DamageType enum → element name (subclass items are named "Gunslinger" etc., users say "Solar")
+    const ELEMENT: Record<number, string> = { 1: 'kinetic', 2: 'arc', 3: 'solar', 4: 'void', 6: 'stasis', 7: 'strand' };
     // itemType 16 = Subclass
-    const subclass = items.find((i: any) => {
+    const matches = (i: any) => {
       const def = getDef('DestinyInventoryItemDefinition', i.itemHash);
-      return def?.itemType === 16 && def.displayProperties.name.toLowerCase().includes(q);
-    });
+      if (def?.itemType !== 16) return false;
+      const element = ELEMENT[def.talentGrid?.hudDamageType] ?? '';
+      return def.displayProperties.name.toLowerCase().includes(q) || element.includes(q);
+    };
+    let subclass = (r.characterEquipment?.data?.[character_id]?.items ?? []).find(matches);
+    const alreadyEquipped = !!subclass;
+    subclass ??= (r.characterInventories?.data?.[character_id]?.items ?? []).find(matches);
     if (!subclass) throw new Error(`No subclass matching "${subclass_name}" on that character.`);
-    await post(`${ACTIONS}/Items/EquipItem/`, { itemId: subclass.itemInstanceId, characterId: character_id });
-    const results = [`Equipped ${defName('DestinyInventoryItemDefinition', subclass.itemHash)}.`];
+    const name = defName('DestinyInventoryItemDefinition', subclass.itemHash);
+    if (!alreadyEquipped) {
+      await post(`${ACTIONS}/Items/EquipItem/`, { itemId: subclass.itemInstanceId, characterId: character_id });
+    }
+    const results = [alreadyEquipped ? `Already equipped: ${name}.` : `Equipped ${name}.`];
     for (const p of plugs) {
       const plugItemHash = resolvePlugHash(p.plug);
       await post(`${ACTIONS}/Items/InsertSocketPlugFree/`, {

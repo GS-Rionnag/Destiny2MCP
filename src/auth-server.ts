@@ -35,7 +35,7 @@ export function startAuthServer(): void {
     }
   });
 
-  https.createServer({ key, cert }, app).listen(config.authPort, () => {
+  https.createServer({ key, cert }, app).listen(config.authPort, '127.0.0.1', () => {
     console.log(`OAuth: open https://localhost:${config.authPort}/auth to link your Bungie account`);
   });
 }

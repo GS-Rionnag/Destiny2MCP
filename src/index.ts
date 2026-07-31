@@ -39,7 +39,7 @@ async function main() {
   });
   app.get('/mcp', (_req, res) => { res.status(405).json({ error: 'POST only (stateless mode)' }); });
 
-  app.listen(config.port, () => {
+  app.listen(config.port, '127.0.0.1', () => {
     console.log(`MCP endpoint: http://localhost:${config.port}/mcp`);
     const t = readTokens();
     if (!t) console.log(`Not authenticated yet — open https://localhost:${config.authPort}/auth`);
