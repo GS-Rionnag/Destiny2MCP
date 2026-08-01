@@ -48,11 +48,25 @@ One profile GET, components `100,104,200,201,202,301,1200`. The existing 60s GET
 | Component | Feeds |
 |---|---|
 | 100 Profiles | `profile.data.currentSeasonHash` — resolves the season pass without date math |
-| 104 ProfileProgression | profile-scoped seasonal artifact, checklists |
+| 104 ProfileProgression | seasonal artifact — the **only** source for it, see below |
 | 200 Characters | active-character pick, class name, power |
-| 202 CharacterProgressions | ranks, milestones, quests, `uninstancedItemObjectives`, character artifact |
+| 202 CharacterProgressions | ranks, milestones, quests, `uninstancedItemObjectives` |
 | 201 CharacterInventories | bounty (`itemType` 26) and quest-step (`itemType` 12) items |
 | 301 ItemObjectives | x/y progress for those items, via `itemComponents.objectives` |
+
+Two shape traps, both confirmed against `data/openapi.json`:
+
+- **The artifact comes from 104, never 202.** `DestinyArtifactCharacterScoped` (202) carries only
+  `artifactHash, pointsUsed, resetCount, tiers`. `powerBonus`, `pointsAcquired` and
+  `pointProgression` exist solely on `DestinyArtifactProfileScoped` (104). Reading 202 does not
+  fail — it returns zeros, which is worse. There is no fallback: if 104 is absent the section is
+  omitted.
+- **`uninstancedItemObjectives` maps item hash directly to an array** of `DestinyObjectiveProgress`.
+  There is no `.objectives` wrapper. Only the instanced side
+  (`itemComponents.objectives.data[instanceId]`) is a `DestinyItemObjectivesComponent` with an
+  `.objectives` array. The two sides read differently.
+- The artifact name resolves through `DestinyArtifactDefinition`, not
+  `DestinyInventoryItemDefinition`.
 | 1200 StringVariables | substitutes `{var:hash}` in objective text |
 
 **The fetch is fat, the response is thin.** Bungie returns every character regardless of what
