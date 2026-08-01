@@ -77,7 +77,12 @@ export async function bungieFetch<T = any>(path: string, opts: FetchOpts = {}, r
   return data.Response as T;
 }
 
-let account: { membershipType: number; membershipId: string; characterIds: string[] } | null = null;
+let account: {
+  membershipType: number;
+  membershipId: string;
+  characterIds: string[];
+  bungieName: string;
+} | null = null;
 
 export async function getAccount() {
   if (account) return account;
@@ -94,6 +99,9 @@ export async function getAccount() {
     membershipType: m.membershipType,
     membershipId: m.membershipId,
     characterIds: prof.profile.data.characterIds,
+    bungieName: m.bungieGlobalDisplayName
+      ? `${m.bungieGlobalDisplayName}#${m.bungieGlobalDisplayNameCode}`
+      : m.displayName,
   };
   return account;
 }

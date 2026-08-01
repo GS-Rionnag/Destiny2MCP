@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
 import { defName, getDef, searchDefs } from '../manifest.js';
+import { SEARCH_COMPONENTS, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
 import { tool } from './util.js';
 
 export function itemSummary(item: any, instances?: Record<string, any>) {
@@ -55,13 +56,22 @@ const profilePath = async () => {
   return `/Destiny2/${a.membershipType}/Profile/${a.membershipId}`;
 };
 
+// Orbit's activity def exists but has an empty name, so the hash is the only usable signal.
+const ORBIT_ACTIVITY_HASH = 82913930;
+// modeType 40 is "Social" in DestinyActivityModeDefinition — Tower, Farm, every hub.
+const SOCIAL_MODE_TYPE = 40;
+
 export function registerReadTools(server: McpServer): void {
   server.registerTool('get_profile', {
-    description: 'Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer.',
+    description: 'Destiny 2 account overview: who the player is (Bungie name, membership), characters (class, power, race, playtime), currencies like Glimmer.',
     inputSchema: z.object({}),
   }, tool(async () => {
+    const a = await getAccount();
     const r = await bungieFetch<any>(`${await profilePath()}/`, { auth: true, query: { components: '100,200,103' } });
     return {
+      bungieName: a.bungieName,
+      membershipId: a.membershipId,
+      membershipType: a.membershipType,
       characters: Object.values<any>(r.characters.data).map((c) => ({
         characterId: c.characterId,
         class: defName('DestinyClassDefinition', c.classHash),
@@ -74,6 +84,47 @@ export function registerReadTools(server: McpServer): void {
         name: defName('DestinyInventoryItemDefinition', i.itemHash),
         quantity: i.quantity,
       })),
+    };
+  }));
+
+  server.registerTool('get_session_state', {
+    description: 'Whether the player is online and which writes are allowed RIGHT NOW. Equipping and socketing only work in orbit, a social space, or offline; transfers, locks and postmaster pulls always work. Call this once before a write instead of probing the profile to work it out.',
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const r = await bungieFetch<any>(`${await profilePath()}/`, { auth: true, query: { components: '200,204,1000' } });
+    const chars = Object.values<any>(r.characters?.data ?? {});
+    // profileTransitoryData only exists while the account is actually in a game session.
+    const online = !!r.profileTransitoryData?.data;
+    // Only ONE character can be in an activity, and the others report currentActivityHash 0 —
+    // so "any character is in orbit" would say writes are fine while the played character raids.
+    // Bungie also leaves stale nonzero hashes behind after logoff, which rules out counting
+    // nonzero hashes; dateLastPlayed is the one signal that survives both cases.
+    const active = chars.reduce<any>((a, c) => (!a || c.dateLastPlayed > a.dateLastPlayed ? c : a), null);
+    const hash: number = (active && r.characterActivities?.data?.[active.characterId]?.currentActivityHash) || 0;
+    const def = hash ? getDef('DestinyActivityDefinition', hash) : undefined;
+
+    // Anything we cannot positively classify fails closed: a wrong "go ahead" costs a failed write.
+    const [state, reason] =
+      !online ? ['offline', 'Not in a game session — writes are unrestricted.'] as const
+      : !active ? ['unknown', 'In a game session but no character could be identified.'] as const
+      : hash === ORBIT_ACTIVITY_HASH ? ['orbit', 'Active character is in orbit.'] as const
+      : def?.directActivityModeType === SOCIAL_MODE_TYPE
+        ? ['social', `Active character is in a social space (${def.displayProperties?.name || 'unnamed'}).`] as const
+      : def ? ['activity', `Active character is in ${def.displayProperties?.name || 'an activity'} — equip and socket writes will be refused.`] as const
+      : ['unknown', 'In a game session but the current activity could not be resolved.'] as const;
+
+    const restricted = state === 'offline' || state === 'orbit' || state === 'social';
+    return {
+      online,
+      activeCharacterId: active?.characterId,
+      state,
+      activity: hash ? { hash, name: def?.displayProperties?.name || (state === 'orbit' ? 'Orbit' : undefined) } : undefined,
+      writeCapabilities: {
+        equip: restricted, socket: restricted,
+        transfer: true, lock: true, postmaster: true,
+      },
+      reason,
+      characters: chars.map((c) => ({ characterId: c.characterId, active: c.characterId === active?.characterId })),
     };
   }));
 
@@ -94,48 +145,118 @@ export function registerReadTools(server: McpServer): void {
   }));
 
   server.registerTool('search_inventory', {
-    description: 'Search ALL items across every character and the vault. Filter by name and/or item type substring (e.g. "Rocket Launcher", "Helmet"). Returns instance ids needed by transfer/equip tools.',
+    description: `Search ALL items across every character and the vault with DIM search syntax. Returns the instance ids that transfer/equip/insert_plug need.
+
+One query replaces several searches — combine every condition instead of calling this per slot.
+Filters: is:<keyword> (rarity, element, ammo, class, weapon/armor type, locked/masterwork/crafted/dupe/invault/equipped/postmaster), name:, description:, perk:, type:, power:<comparison>, stat:<name>:<comparison>, count:. Combine with spaces (and), "or", "-" or "not" to negate, and parentheses.
+Examples:
+  is:armor is:hunter -is:exotic stat:resilience:>=20
+  is:weapon is:solar perk:incandescent is:masterwork
+  (is:handcannon or is:smg) is:legendary power:>=1800
+  is:dupe is:legendary -is:locked
+
+Answer in ONE call instead of paging:
+  count_only — just the number, no items
+  group_by — counts per itemHash/name/type/tier/location over EVERY match, not just the page. Use itemHash for dupe audits; several distinct items share a name.
+  queries — several searches against one inventory snapshot, e.g. [{"id":"vault","query":"is:invault","count_only":true},{"id":"chars","query":"-is:invault","count_only":true}]`,
     inputSchema: z.object({
-      name: z.string().optional().describe('Case-insensitive name substring'),
-      type: z.string().optional().describe('Case-insensitive item type substring, e.g. "Hand Cannon"'),
+      query: z.string().optional().describe('DIM search query. Omit to list everything.'),
+      sort: z.string().optional().describe('"power", "name", "quantity" or "stat:<name>" — numeric sorts are highest first, applied before limit'),
       // Clamped, not rejected: a model guessing limit:500 should get 200 items, not a wasted turn
       limit: z.number().int().min(1).transform((n) => Math.min(n, 200)).default(50),
+      count_only: z.boolean().default(false).describe('Return only the match count'),
+      group_by: z.enum(['itemHash', 'name', 'type', 'tier', 'location']).optional()
+        .describe('Return counts per group instead of items, computed over all matches'),
+      group_limit: z.number().int().min(1).transform((n) => Math.min(n, 500)).default(50),
+      queries: z.array(z.object({
+        id: z.string(),
+        query: z.string(),
+        count_only: z.boolean().default(false),
+      })).min(1).max(10).optional().describe('Run several searches against one snapshot. Replaces query/sort.'),
     }),
-  }, tool(async ({ name, type, limit }) => {
+  }, tool(async ({ query, sort, limit, count_only, group_by, group_limit, queries }) => {
+    // Compile first: a bad query should cost no API call, and should come back as the keyword list.
+    const plan = (q?: string) => {
+      const { predicate, statsUsed, usedPerks } = compileQuery(q ?? '');
+      return {
+        predicate,
+        showStats: statsUsed,
+        perkTerms: usedPerks && q ? [...q.matchAll(/perk(?:name)?:("[^"]*"|'[^']*'|\S+)/gi)]
+          .map((m) => m[1].replace(/^['"]|['"]$/g, '').toLowerCase()) : [],
+      };
+    };
+    const compiled = queries?.map((q) => ({ ...q, ...plan(q.query) })) ?? [];
+    const single = queries ? undefined : plan(query);
+    const sortStat = !queries && sort?.toLowerCase().startsWith('stat:')
+      ? sort.slice(5).toLowerCase().replace(/[^a-z0-9.]/g, '') : undefined;
+    if (!queries && sort) sortItems([], sort); // validate before spending an API call on a query we can't answer
+
     const r = await bungieFetch<any>(`${await profilePath()}/`, {
-      auth: true, query: { components: '102,201,205,200,300' },
+      auth: true, query: { components: SEARCH_COMPONENTS },
     });
-    const chars = r.characters.data;
-    const instances = r.itemComponents?.instances?.data;
-    const locName = (cid: string, equipped: boolean) =>
-      `${defName('DestinyClassDefinition', chars[cid].classHash)}${equipped ? ' (equipped)' : ''}`;
-    const all: any[] = [
-      ...(r.profileInventory?.data?.items ?? []).map((i: any) => ({ ...i, location: 'Vault' })),
-      ...Object.entries<any>(r.characterInventories?.data ?? {}).flatMap(([cid, inv]) =>
-        inv.items.map((i: any) => ({ ...i, location: locName(cid, false), characterId: cid }))),
-      ...Object.entries<any>(r.characterEquipment?.data ?? {}).flatMap(([cid, inv]) =>
-        inv.items.map((i: any) => ({ ...i, location: locName(cid, true), characterId: cid }))),
-    ];
-    const nameQ = name?.toLowerCase(), typeQ = type?.toLowerCase();
-    const out = [];
-    for (const item of all) {
-      const s = { ...itemSummary(item, instances), location: item.location, characterId: item.characterId };
-      if (nameQ && !s.name.toLowerCase().includes(nameQ)) continue;
-      if (typeQ && !(s.type ?? '').toLowerCase().includes(typeQ)) continue;
-      out.push(s);
-      if (out.length >= limit) break;
+    const all = buildItems(r);
+
+    const groupsOf = (matches: SearchItem[]) => {
+      const counts = new Map<string, { key: string; itemHash?: number; name?: string; count: number }>();
+      for (const i of matches) {
+        const key = group_by === 'itemHash' ? String(i.itemHash) : String(i[group_by!] ?? 'Unknown');
+        const g = counts.get(key) ?? { key, count: 0, ...(group_by === 'itemHash' ? { itemHash: i.itemHash, name: i.name } : {}) };
+        g.count++;
+        counts.set(key, g);
+      }
+      const sorted = [...counts.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+      return { groupTotal: sorted.length, truncated: sorted.length > group_limit, groups: sorted.slice(0, group_limit) };
+    };
+
+    const project = (matches: SearchItem[], p: { showStats: string[]; perkTerms: string[] }) => {
+      // Echo back only the stats and perks the query asked about — everything else is wasted context.
+      const showStats = [...new Set([...p.showStats, ...(sortStat ? [sortStat] : [])])];
+      return matches.slice(0, limit).map((i) => ({
+        name: i.name,
+        itemHash: i.itemHash,
+        itemInstanceId: i.itemInstanceId,
+        type: i.type,
+        tier: i.tier,
+        power: i.power,
+        quantity: i.quantity > 1 ? i.quantity : undefined,
+        location: i.location,
+        characterId: i.characterId,
+        stats: showStats.length ? Object.fromEntries(showStats.map((s) => [s, statValue(i, s)])) : undefined,
+        perks: p.perkTerms.length ? i.plugs.filter((pl) => p.perkTerms.some((t) => pl.includes(t))) : undefined,
+      }));
+    };
+
+    if (queries) {
+      return {
+        results: compiled.map((c) => {
+          const matches = all.filter(c.predicate);
+          if (c.count_only) return { id: c.id, total: matches.length };
+          const items = project(matches, c);
+          return { id: c.id, count: items.length, total: matches.length, items };
+        }),
+      };
     }
-    return { count: out.length, items: out };
+
+    let matches = all.filter(single!.predicate);
+    const total = matches.length;
+    if (count_only) return { total };
+    if (group_by) return { total, ...groupsOf(matches) };
+    if (sort) matches = sortItems(matches, sort);
+    const items = project(matches, single!);
+    return { count: items.length, total, items };
   }));
 
   server.registerTool('get_item_details', {
-    description: 'Full detail for item instances: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. Pass every instance id you care about in one call — do not call this once per item. Set include_plug_options to also list what each socket ACCEPTS (bigger response — pair it with socket_index, and with few ids), so you never have to guess a socket index.',
+    description: 'Full detail for item instances: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. Pass every instance id you care about in one call — do not call this once per item. Set include_plug_options to also list what each socket ACCEPTS (bigger response — pair it with socket_index, and with few ids), so you never have to guess a socket index. Options are paged: raise option_limit and walk nextOffset to see every one (shader/ornament sockets have 700+).',
     inputSchema: z.object({
       item_instance_ids: z.array(z.string()).min(1).max(15),
       include_plug_options: z.boolean().default(false).describe('List insertable plugs per socket (much bigger response)'),
       socket_index: z.number().int().min(0).optional().describe('Limit plug options to this one socket — much smaller than listing every socket'),
+      option_limit: z.number().int().min(1).transform((n) => Math.min(n, 200)).default(12)
+        .describe('Plug options per socket, max 200. Pair a high value with socket_index.'),
+      option_offset: z.number().int().min(0).default(0).describe('Skip this many options — feed it the nextOffset from the last call'),
     }),
-  }, tool(async ({ item_instance_ids, include_plug_options, socket_index }) => {
+  }, tool(async ({ item_instance_ids, include_plug_options, socket_index, option_limit, option_offset }) => {
     // One bad id must not lose the other 14 — report it in place and keep going.
     const one = async (item_instance_id: string) => {
       const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
@@ -144,7 +265,8 @@ export function registerReadTools(server: McpServer): void {
       const inst = r.instance?.data;
       const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
       const socketEntries: any[] = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
-      // ponytail: 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up the response
+      // Default of 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up a
+      // whole-item response; option_offset/nextOffset make the rest reachable when you actually want them.
       const options = (i: number) => {
         if (!include_plug_options || (socket_index !== undefined && i !== socket_index)) return undefined;
         // The API only fills reusablePlugs for weapon-style sockets; armor mods and subclass
@@ -158,14 +280,23 @@ export function registerReadTools(server: McpServer): void {
             : (e.reusablePlugItems ?? []);
           hashes = fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
         }
-        // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from
+        // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from.
+        // Nameless plugs are hidden intrinsics the game never offers; listing them as "#969663972" is pure noise.
         const byName = new Map<string, number>();
         for (const h of hashes) {
-          const n = defName('DestinyInventoryItemDefinition', h);
-          if (!byName.has(n)) byName.set(n, h);
+          const n = getDef('DestinyInventoryItemDefinition', h)?.displayProperties?.name;
+          if (n && !byName.has(n)) byName.set(n, h);
         }
         const uniq = [...byName].map(([name, hash]) => ({ hash, name }));
-        return { options: uniq.slice(0, 12), moreOptions: uniq.length > 12 ? uniq.length - 12 : undefined };
+        const page = uniq.slice(option_offset, option_offset + option_limit);
+        const seen = option_offset + page.length;
+        return {
+          options: page,
+          optionTotal: uniq.length,
+          optionOffset: option_offset,
+          moreOptions: uniq.length - seen || undefined,
+          nextOffset: seen < uniq.length ? seen : null,
+        };
       };
       return {
         itemInstanceId: item_instance_id,
@@ -176,7 +307,7 @@ export function registerReadTools(server: McpServer): void {
           .map(([h, s]) => [defName('DestinyStatDefinition', Number(h)), s.value])),
         sockets: (r.sockets?.data?.sockets ?? []).map((s: any, i: number) => ({
           socketIndex: i,
-          plug: s.plugHash ? defName('DestinyInventoryItemDefinition', s.plugHash) : null,
+          plug: (s.plugHash && getDef('DestinyInventoryItemDefinition', s.plugHash)?.displayProperties?.name) || null,
           plugHash: s.plugHash,
           enabled: s.isEnabled,
           ...options(i),
@@ -194,19 +325,29 @@ export function registerReadTools(server: McpServer): void {
 
   server.registerTool('get_vendors', {
     description: 'List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock.',
-    inputSchema: z.object({ character_id: z.string().describe('Vendors are per-character; from get_profile') }),
-  }, tool(async ({ character_id }) => {
+    inputSchema: z.object({
+      character_id: z.string().describe('Vendors are per-character; from get_profile'),
+      include_submenus: z.boolean().default(false)
+        .describe('Also return the subclass/kiosk sub-vendors ("Aspects", "Melees", "Armor"...) — ~5x more entries, rarely what you want'),
+    }),
+  }, tool(async ({ character_id, include_submenus }) => {
     const r = await bungieFetch<any>(`${await profilePath()}/Character/${character_id}/Vendors/`, {
       auth: true, query: { components: '400' },
     });
     return Object.values<any>(r.vendors.data)
-      .map((v) => ({
-        vendorHash: v.vendorHash,
-        name: defName('DestinyVendorDefinition', v.vendorHash),
-        nextRefresh: v.nextRefreshDate,
-        enabled: v.enabled,
-      }))
-      .filter((v) => !v.name.startsWith('#'));
+      .map((v) => {
+        const def = getDef('DestinyVendorDefinition', v.vendorHash);
+        return {
+          vendorHash: v.vendorHash,
+          name: def?.displayProperties?.name || `#${v.vendorHash}`,
+          // Real NPCs carry a title ("Agent of the Nine"); the subclass/kiosk submenus that
+          // make up most of the ~200 records have none. That is the only reliable split.
+          subtitle: def?.displayProperties?.subtitle || undefined,
+          nextRefresh: v.nextRefreshDate,
+          enabled: v.enabled,
+        };
+      })
+      .filter((v) => !v.name.startsWith('#') && (include_submenus || v.subtitle));
   }));
 
   server.registerTool('get_vendor_items', {
@@ -231,12 +372,17 @@ export function registerReadTools(server: McpServer): void {
     return Object.entries<any>(r.characterLoadouts?.data ?? {}).map(([cid, l]) => ({
       characterId: cid,
       class: defName('DestinyClassDefinition', chars[cid].classHash),
-      loadouts: l.loadouts.map((lo: any, i: number) => ({
-        loadoutIndex: i,
-        name: defName('DestinyLoadoutNameDefinition', lo.nameHash),
-        empty: !lo.items?.length,
-        itemInstanceIds: (lo.items ?? []).map((it: any) => it.itemInstanceId),
-      })),
+      loadouts: l.loadouts.map((lo: any, i: number) => {
+        // Bungie always sends 16 slots; unused ones are full of "0" ids and an unset nameHash
+        // (2166136261 — the FNV-1a basis, which has no LoadoutNameDefinition row).
+        const ids = (lo.items ?? []).map((it: any) => it.itemInstanceId).filter((id: string) => id && id !== '0');
+        return {
+          loadoutIndex: i,
+          name: getDef('DestinyLoadoutNameDefinition', lo.nameHash)?.displayProperties?.name ?? null,
+          empty: !ids.length,
+          itemInstanceIds: ids,
+        };
+      }),
     }));
   }));
 

@@ -61,6 +61,12 @@ export function searchDefs(query: string, table = 'DestinyInventoryItemDefinitio
   return out.slice(0, limit);
 }
 
+/** Every row of a table, parsed. Used to build keyword tables (item categories, stat names). */
+export function eachDef(table: string): any[] {
+  if (!/^Destiny\w+Definition$/.test(table)) throw new Error(`Invalid manifest table: ${table}`);
+  return (need().prepare(`SELECT json FROM ${table}`).all() as any[]).map((r) => JSON.parse(r.json));
+}
+
 export function firstHash(table: string): number {
   if (!/^Destiny\w+Definition$/.test(table)) throw new Error(`Invalid manifest table: ${table}`);
   const row = need().prepare(`SELECT json FROM ${table} LIMIT 1`).get() as any;

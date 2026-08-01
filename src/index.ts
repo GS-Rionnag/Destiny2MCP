@@ -32,6 +32,11 @@ Batch your calls — every extra round trip is a full turn:
 - insert_plug takes a plugs array — send a whole item's mods at once
 - get_definition takes up to 50 hashes
 
+search_inventory speaks DIM search syntax (is:, name:, perk:, power:>=, stat:x:>=n,
+or/-/parens). Put every condition in one query — "is:armor is:hunter -is:exotic
+stat:resilience:>=20" answers in one call what seven name/type searches cannot. Add
+sort to get the highest few instead of a list to scan.
+
 Pick the right tool:
 - Names/descriptions for a hash: get_definition. It reads a local copy of the
   manifest — instant and far smaller than fetching /Destiny2/Manifest/ over the API.
@@ -44,14 +49,15 @@ socket_index — it tells you exactly what that socket accepts. Do not guess ind
 
 Equipping and socketing only work when the character is in orbit, in a social
 space, or offline. "You must either be logged off or in orbit" means the player
-is in an activity, not that the call was wrong.
+is in an activity, not that the call was wrong. get_session_state answers this in
+one call — do not go work it out from the profile.
 
 GET responses are cached for 60s, so re-reading something you just read is cheap,
 and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.3.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.6.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);

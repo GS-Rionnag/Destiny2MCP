@@ -95,7 +95,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 |------|-------------|
 | `get_profile` | Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer. |
 | `get_character` | One character in detail: stats (Mobility etc.) and all currently equipped items with power. |
-| `search_inventory` | Search ALL items across every character and the vault. Filter by name and/or item type substring (e.g. "Rocket Launcher", "Helmet"). Returns instance ids needed by transfer/equip tools. |
+| `search_inventory` | Search ALL items across every character and the vault using [DIM search syntax](#dim-search-syntax) — `is:armor is:hunter -is:exotic stat:resilience:>=20`. Optional `sort` (`power`, `name`, `quantity`, `stat:<name>`) is applied before `limit`. Returns instance ids needed by transfer/equip tools. |
 | `get_item_details` | Full detail for up to 15 item instances in one call: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. A bad id is reported in place, not fatal. |
 | `get_vendors` | List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock. |
 | `get_vendor_items` | One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386). |
@@ -131,6 +131,35 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `bungie_api_call` | Escape hatch: call ANY Bungie.net Platform endpoint directly. path is relative to /Platform, e.g. "/Destiny2/Manifest/". Prefer the specific tools when one fits; responses here are raw JSON with unresolved hashes. |
 
 The spec behind the first two is downloaded once (1.8MB) to `data/openapi.json` on first use. Delete that file to pick up Bungie's latest.
+
+## DIM search syntax
+
+`search_inventory` uses [DIM's item search language](https://github.com/DestinyItemManager/DIM/wiki/Item-Search).
+The lexer and parser are ported from DIM (`src/search/query-parser.ts`, MIT), so a query that parses
+in DIM parses here — same operators, same precedence, same quoting.
+
+Like DIM, one profile fetch pulls everything and every filter runs locally, so a complex query costs
+exactly one API call. Repeat searches inside 60s hit the response cache and cost none.
+
+| | |
+|---|---|
+| **Logic** | space = and, `or`, `and`, `not`, `-` to negate, `( )` to group, `"quoted phrases"` |
+| **Text** | `name:`, `exactname:`, `description:`, `type:`, `perk:` / `perkname:`, or a bare word (matches name, type or perk) |
+| **Rarity** | `is:common` `is:uncommon` `is:rare` `is:legendary` `is:exotic` (+ `white` `green` `blue` `purple` `yellow`) |
+| **Element** | `is:kinetic` `is:arc` `is:solar` `is:void` `is:stasis` `is:strand` |
+| **Ammo / class** | `is:primary` `is:special` `is:heavy`; `is:titan` `is:hunter` `is:warlock` |
+| **Item type** | any category from the manifest: `is:handcannon` `is:sniperrifle` `is:helmet` `is:gauntlets` `is:weapon` `is:armor`, plus `is:lfr` `is:lmg` `is:smg` |
+| **State** | `is:locked` `is:unlocked` `is:masterwork` `is:crafted` / `is:shaped` `is:tracked` `is:modded` `is:dupe` |
+| **Location** | `is:invault` `is:oncharacter` `is:equipped` `is:postmaster` `is:transferable` |
+| **Numbers** | `power:` `light:` `stack:` `count:` `energycapacity:`, each taking `>`, `>=`, `<`, `<=`, `=` or a bare number |
+| **Stats** | `stat:<name>:<comparison>`, e.g. `stat:resilience:>=20`, plus `stat:total:` for the armor total |
+
+Armor 3.0 renamed the six armor stats (Resilience → Health, Mobility → Weapons, and so on). Both
+names work — the old ones are aliases, as they are in DIM.
+
+Not supported, because they need DIM Sync or data Bungie's API doesn't serve: `tag:`, `notes:`,
+`season:`, `source:`, `foundry:`, `basestat:`, wishlists. An unknown keyword comes back as an error
+listing everything that is supported.
 
 ## Known Bungie limits
 
