@@ -77,6 +77,26 @@ Keep `tunnel-client run` alive alongside `npm start` (e.g. systemd services) —
 
 Alternative without an OpenAI platform account: expose the server publicly with `cloudflared tunnel --url http://localhost:7777` and add the URL as a connector — but then anyone with the URL controls your Destiny inventory; protect it or rotate it regularly.
 
+## Scheduled monitoring
+
+ChatGPT's Scheduled Tasks run a prompt on a timer (max hourly) and start **every run with a fresh context** — a task cannot remember what it reported last time. `search_inventory sort:recent` therefore re-reports the same drops forever.
+
+`get_new_items` moves that memory server-side. It stores the highest item instance id it has seen per `cursor` in `data/watermarks.json` (instance ids are allocated monotonically, so "id above the mark" means "acquired since"), and returns `{"new": 0}` when nothing arrived — the tool description tells the model to stay silent in that case, so no push notification fires on a quiet hour.
+
+Task prompt that works:
+
+> Every hour, call `get_new_items` with cursor `"chatgpt-hourly"`. If `new` is 0, reply with nothing. Otherwise list the items with tier and power.
+
+Notes:
+
+- The **first** call on a cursor only records a baseline (`initialized: true`). Drops are reported from the second call on.
+- Give each task its own `cursor`. Two tasks sharing one cursor eat each other's deltas. Use `peek: true` to look without consuming.
+- A `query` filters what is reported but not how far the watermark moves — so `query: "is:exotic"` will never re-scan the legendaries it skipped.
+- Detects arrivals only, not dismantles or transfers.
+- The hourly cap does not lose anything: the watermark is id-based, not time-based, so a longer gap just means a bigger batch.
+- Plus/Pro developer-mode connectors are **read-only** — `get_new_items` works there; the write tools need Business/Enterprise.
+- If the Bungie refresh token dies, calls fail with a message starting `REAUTH REQUIRED`, which surfaces in the task's notification instead of failing silently.
+
 ## Connect Claude
 
 Claude Code:
@@ -87,15 +107,17 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (26)
+## Tools (28)
 
-### Read (13)
+### Read (16)
 
 | Tool | Description |
 |------|-------------|
 | `get_profile` | Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer. |
+| `get_session_state` | Whether the player is online and which writes are allowed right now — equip/socket need orbit, a social space, or offline. One call instead of deducing it from the profile. |
 | `get_character` | One character in detail: stats (Mobility etc.) and all currently equipped items with power. |
-| `search_inventory` | Search ALL items across every character and the vault using [DIM search syntax](#dim-search-syntax) — `is:armor is:hunter -is:exotic stat:resilience:>=20`. Optional `sort` (`power`, `name`, `quantity`, `stat:<name>`) is applied before `limit`. Returns instance ids needed by transfer/equip tools. |
+| `search_inventory` | Search ALL items across every character and the vault using [DIM search syntax](#dim-search-syntax) — `is:armor is:hunter -is:exotic stat:resilience:>=20`. Optional `sort` (`power`, `name`, `recent`, `quantity`, `stat:<name>`) is applied before `limit`. Returns instance ids needed by transfer/equip tools. |
+| `get_new_items` | Items acquired since the last check — for scheduled/recurring monitoring. Keeps a watermark per `cursor` in `data/watermarks.json`, so each drop is reported exactly once even to a client with no memory between runs. Optional DIM `query` filters what gets reported; `peek` reports without advancing. See [Scheduled monitoring](#scheduled-monitoring). |
 | `get_item_details` | Full detail for up to 15 item instances in one call: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. A bad id is reported in place, not fatal. |
 | `get_vendors` | List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock. |
 | `get_vendor_items` | One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386). |
@@ -122,7 +144,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `insert_plug` | Socket mods/aspects/fragments/free perks into one item — pass every socket in a single `plugs` array. plug = exact name or hash; socket indexes from get_item_details. A failed socket is reported without aborting the rest. Only FREE socket operations work (Bungie blocks paid ones for all third-party apps). |
 | `change_subclass` | Equip a subclass by name (e.g. "Solar", "Prismatic") and optionally configure its super/aspects/fragments in one call. For plugs: first call get_item_details on the subclass instance to see socket indexes. |
 
-### Raw (1)
+### Raw (3)
 
 | Tool | Description |
 |------|-------------|

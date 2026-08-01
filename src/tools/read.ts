@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
 import { defName, getDef, searchDefs } from '../manifest.js';
 import { SEARCH_COMPONENTS, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
+import { maxId, newerThan, readMarks, saveMark } from '../watermark.js';
 import { tool } from './util.js';
 
 export function itemSummary(item: any, instances?: Record<string, any>) {
@@ -244,6 +245,55 @@ Answer in ONE call instead of paging:
     if (sort) matches = sortItems(matches, sort);
     const items = project(matches, single!);
     return { count: items.length, total, items };
+  }));
+
+  server.registerTool('get_new_items', {
+    description: `Items acquired since the last check. Use this for scheduled or recurring monitoring — it remembers where it left off, so you do not have to.
+
+Returns {"new": 0} when nothing arrived. In that case output nothing at all and end the run.
+The first call on a cursor only records a baseline; real drops come from the call after it.
+For "what did I just get" in a normal conversation use search_inventory with sort:recent instead — that one repeats itself, this one does not.`,
+    inputSchema: z.object({
+      query: z.string().optional().describe('Optional DIM filter, e.g. "is:exotic" — only new items matching it are reported. The watermark still advances past everything else.'),
+      cursor: z.string().default('default').describe('Watermark name. Give each scheduled task its own name so two tasks do not consume each other\'s new items.'),
+      peek: z.boolean().default(false).describe('Report without advancing the watermark — the same items come back next call.'),
+      limit: z.number().int().min(1).transform((n) => Math.min(n, 100)).default(25),
+    }),
+  }, tool(async ({ query, cursor, peek, limit }) => {
+    const { predicate } = compileQuery(query ?? ''); // compile first: a bad query should cost no API call
+    const prev = readMarks()[cursor];
+    const all = buildItems(await bungieFetch<any>(`${await profilePath()}/`, {
+      auth: true, query: { components: SEARCH_COMPONENTS },
+    }));
+    const high = maxId(all);
+    const now = new Date().toISOString();
+
+    if (!prev) {
+      if (!peek) saveMark(cursor, high, now);
+      return { new: 0, initialized: true, cursor, note: 'Baseline recorded — the next call reports what arrives after now.' };
+    }
+    // Advance past everything, not just the query matches: a filtered cursor whose mark only
+    // moved to the last exotic would re-scan and re-report every drop in between.
+    if (!peek && high > prev.id) saveMark(cursor, high, now);
+
+    const fresh = sortItems(newerThan(all, prev.id).filter(predicate), 'recent');
+    if (!fresh.length) return { new: 0 };
+    return {
+      new: fresh.length,
+      since: prev.at,
+      cursor,
+      truncated: fresh.length > limit || undefined,
+      items: fresh.slice(0, limit).map((i) => ({
+        name: i.name,
+        itemHash: i.itemHash,
+        itemInstanceId: i.itemInstanceId,
+        type: i.type,
+        tier: i.tier,
+        power: i.power,
+        location: i.location,
+        characterId: i.characterId,
+      })),
+    };
   }));
 
   server.registerTool('get_item_details', {

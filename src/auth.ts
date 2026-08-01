@@ -54,10 +54,12 @@ const authUrl = () => `https://localhost:${config.authPort}/auth`;
 
 export async function getAccessToken(): Promise<string> {
   const t = readTokens();
-  if (!t) throw new Error(`Not authenticated. Open ${authUrl()} in a browser to link your Bungie account.`);
+  // "REAUTH REQUIRED" leads the message so an unattended scheduled run surfaces it as the
+  // headline instead of burying it — nobody is watching the logs when a token dies.
+  if (!t) throw new Error(`REAUTH REQUIRED: not authenticated. Open ${authUrl()} in a browser to link your Bungie account.`);
   if (Date.now() < t.expiresAt - 60_000) return t.accessToken;
   if (Date.now() > t.refreshExpiresAt) {
-    throw new Error(`Bungie refresh token expired. Re-authenticate at ${authUrl()}.`);
+    throw new Error(`REAUTH REQUIRED: Bungie refresh token expired. Re-authenticate at ${authUrl()}.`);
   }
   const fresh = storeTokenResponse(await tokenRequest({ grant_type: 'refresh_token', refresh_token: t.refreshToken }));
   return fresh.accessToken;

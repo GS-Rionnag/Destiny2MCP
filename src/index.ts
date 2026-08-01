@@ -38,6 +38,10 @@ or/-/parens). Put every condition in one query — "is:armor is:hunter -is:exoti
 stat:resilience:>=20" answers in one call what seven name/type searches cannot. Add
 sort to get the highest few instead of a list to scan.
 
+For a recurring or scheduled check ("tell me what dropped"), use get_new_items, never
+search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
+reports each drop exactly once even though the run that calls it remembers nothing.
+
 Pick the right tool:
 - Names/descriptions for a hash: get_definition. It reads a local copy of the
   manifest — instant and far smaller than fetching /Destiny2/Manifest/ over the API.
@@ -58,7 +62,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.6.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.7.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
