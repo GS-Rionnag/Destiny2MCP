@@ -107,7 +107,7 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (29)
+## Tools (32)
 
 ### Read (17)
 
@@ -154,6 +154,18 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `bungie_api_call` | Escape hatch: call ANY Bungie.net Platform endpoint directly. path is relative to /Platform, e.g. "/Destiny2/Manifest/". Prefer the specific tools when one fits; responses here are raw JSON with unresolved hashes. |
 
 The spec behind the first two is downloaded once (1.8MB) to `data/openapi.json` on first use. Delete that file to pick up Bungie's latest.
+
+### Builds (3)
+
+Community and editorial builds from [Mobalytics](https://mobalytics.gg/destiny-2/builds) — build *ideas*, not the player's inventory. No account, no API key: it is the site's own public GraphQL API. See [docs/mobalytics-api.md](docs/mobalytics-api.md) for the reverse-engineered schema.
+
+| Tool | Description |
+|------|-------------|
+| `search_builds` | Search builds by `class`, `subclass`, `type` (pve/pvp), `tags` (AND), `weapon`/`armor`/`exotic` by name, `author`, `sort` (`trending`/`new`/`top`/`featured`) and `time` (`today`/`week`/`month`). `source: meta` searches Mobalytics' editorial builds instead of player-published ones. Returns a preview card per build — super, abilities by slot, aspects, weapons with perks, armor with the exotic called out, tags, author, favorites — plus a `cursor` for the next page. |
+| `get_build` | Everything on one build id/slug: full loadout, armor exotic perks and set bonuses, mods per slot, fragments, stat priority, artifact perks, and the author's write-up — gameplay loop, how it works, in-depth sections, strengths/weaknesses, DIM import link, video guide. |
+| `find_build_item` | Name → Mobalytics item id, for when a weapon/armor name is ambiguous. `search_builds` resolves names on its own. |
+
+Mobalytics sits behind Cloudflare, which fingerprints TLS and HTTP/2 — plain `fetch` gets a challenge page, so these tools go through `node-tls-client` (a real Chrome fingerprint). It downloads a ~16MB shared library on first run. If Cloudflare ever refuses every profile, the tools say so rather than returning empty results.
 
 ## DIM search syntax
 

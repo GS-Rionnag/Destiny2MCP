@@ -12,6 +12,7 @@ import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerRawTool } from './tools/raw.js';
 import { registerProgressTools } from './tools/progress.js';
+import { registerBuildTools } from './tools/builds.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
@@ -50,6 +51,12 @@ For a recurring or scheduled check ("tell me what dropped"), use get_new_items, 
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
 reports each drop exactly once even though the run that calls it remembers nothing.
 
+"What build should I run", "best Prismatic Titan build", "builds that use Sunbracers" — that is
+search_builds, which reads the Mobalytics community/meta build database, NOT the player's account.
+It returns preview cards (subclass, super, abilities, aspects, weapons + perks, exotic armor, tags);
+get_build then returns that build's full loadout, mods, stat priority, written guide, DIM link and
+video guide. Do not describe a build from memory when these two calls have the current one.
+
 For "what should I do today", "what are my ranks" or "did I do my weekly", use get_progress.
 get_milestones only knows the PUBLIC weekly reset list — it cannot tell you what THIS account
 has already cleared.
@@ -74,11 +81,12 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.10.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.11.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
   registerProgressTools(server);
+  registerBuildTools(server);
   return server;
 }
 
