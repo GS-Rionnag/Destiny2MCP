@@ -5,7 +5,7 @@ vi.mock('../src/manifest.js', () => ({
   defName: vi.fn((_t: string, hash: number) => `Item${hash}`),
 }));
 
-const { buildRanks, resolveSeasonPass, objectiveLine, substituteVars, buildArtifact } = await import('../src/progress.js');
+const { buildRanks, resolveSeasonPass, objectiveLine, substituteVars, buildArtifact, buildMilestones } = await import('../src/progress.js');
 const { getDef, defName } = await import('../src/manifest.js');
 
 beforeEach(() => {
@@ -129,5 +129,39 @@ describe('buildArtifact', () => {
 
   it('returns undefined when no artifact is equipped', () => {
     expect(buildArtifact(undefined)).toBeUndefined();
+  });
+});
+
+describe('buildMilestones', () => {
+  const named = (name: string) => ({ displayProperties: { name } });
+
+  it('reports "unknown" rather than false when there is nothing to derive completion from', () => {
+    vi.mocked(getDef).mockReturnValue(named('Nightfall'));
+    const { rows } = buildMilestones({ '1': { milestoneHash: 1, endDate: '2026-08-04T17:00:00Z' } });
+    expect(rows).toEqual([{ name: 'Nightfall', complete: 'unknown', progress: undefined, ends: '2026-08-04T17:00:00Z' }]);
+  });
+
+  it('derives completion and progress from activity challenges', () => {
+    vi.mocked(getDef).mockReturnValue(named('Weekly Raid'));
+    const { rows } = buildMilestones({
+      '1': {
+        milestoneHash: 1,
+        activities: [{ challenges: [{ objective: { complete: true } }, { objective: { complete: false } }] }],
+      },
+    });
+    expect(rows[0]).toMatchObject({ complete: false, progress: '1/2' });
+  });
+
+  it('hides completed milestones by default but counts them', () => {
+    vi.mocked(getDef).mockReturnValue(named('Weekly Raid'));
+    const input = { '1': { milestoneHash: 1, availableQuests: [{ status: { completed: true } }] } };
+
+    expect(buildMilestones(input)).toEqual({ rows: [], hiddenComplete: 1 });
+    expect(buildMilestones(input, true).rows[0]).toMatchObject({ complete: true, progress: '1/1' });
+  });
+
+  it('skips nameless milestones', () => {
+    vi.mocked(getDef).mockReturnValue({ displayProperties: {} });
+    expect(buildMilestones({ '1': { milestoneHash: 1 } }).rows).toEqual([]);
   });
 });

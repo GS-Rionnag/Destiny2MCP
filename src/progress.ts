@@ -109,3 +109,43 @@ export function buildArtifact(art: any): Artifact | undefined {
     nextPointAt: art.pointProgression ? progressString(art.pointProgression) : undefined,
   };
 }
+
+export type Milestone = { name: string; complete: boolean | 'unknown'; progress?: string; ends?: string };
+
+/**
+ * Bungie is inconsistent about which milestones carry quests versus challenges, and about
+ * whether completed ones are pruned from the response at all. So this fails open to "unknown"
+ * instead of guessing — same call as get_session_state, where a confident wrong answer costs a
+ * wasted turn and an honest one costs a sentence.
+ */
+function milestoneStatus(m: any): { complete: boolean | 'unknown'; progress?: string } {
+  const quests: any[] = m.availableQuests ?? [];
+  if (quests.length) {
+    const done = quests.filter((q) => q.status?.completed === true).length;
+    return { complete: done === quests.length, progress: `${done}/${quests.length}` };
+  }
+  const challenges: any[] = (m.activities ?? []).flatMap((a: any) => a.challenges ?? []);
+  if (challenges.length) {
+    const done = challenges.filter((c) => c.objective?.complete === true).length;
+    return { complete: done === challenges.length, progress: `${done}/${challenges.length}` };
+  }
+  return { complete: 'unknown' };
+}
+
+export function buildMilestones(
+  milestones: Record<string, any>,
+  includeComplete = false,
+): { rows: Milestone[]; hiddenComplete: number } {
+  const rows: Milestone[] = [];
+  let hiddenComplete = 0;
+  for (const m of Object.values<any>(milestones ?? {})) {
+    // Nameless milestones are internal plumbing — the same filter get_milestones already uses.
+    const name: string | undefined = getDef('DestinyMilestoneDefinition', m.milestoneHash)?.displayProperties?.name;
+    if (!name) continue;
+    const { complete, progress } = milestoneStatus(m);
+    if (complete === true && !includeComplete) { hiddenComplete++; continue; }
+    rows.push({ name, complete, progress, ends: m.endDate });
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return { rows, hiddenComplete };
+}
