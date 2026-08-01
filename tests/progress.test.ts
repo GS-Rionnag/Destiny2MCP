@@ -5,8 +5,8 @@ vi.mock('../src/manifest.js', () => ({
   defName: vi.fn((_t: string, hash: number) => `Item${hash}`),
 }));
 
-const { buildRanks, resolveSeasonPass } = await import('../src/progress.js');
-const { getDef } = await import('../src/manifest.js');
+const { buildRanks, resolveSeasonPass, objectiveLine, substituteVars, buildArtifact } = await import('../src/progress.js');
+const { getDef, defName } = await import('../src/manifest.js');
 
 beforeEach(() => {
   vi.mocked(getDef).mockReset().mockReturnValue(undefined);
@@ -98,5 +98,36 @@ describe('resolveSeasonPass', () => {
   it('returns undefined when the season is not in the manifest', () => {
     vi.mocked(getDef).mockReturnValue(undefined);
     expect(resolveSeasonPass(1, {}, new Date('2026-08-01T00:00:00Z'))).toBeUndefined();
+  });
+});
+
+describe('objectiveLine', () => {
+  it('renders x/y plus the description with string variables substituted', () => {
+    vi.mocked(getDef).mockReturnValue({ progressDescription: 'Defeat {var:42} combatants' });
+    expect(objectiveLine({ objectiveHash: 1, progress: 9, completionValue: 10 }, { '42': 30 }))
+      .toBe('9/10 Defeat 30 combatants');
+  });
+
+  it('leaves an unknown variable token alone rather than printing undefined', () => {
+    expect(substituteVars('Defeat {var:42} combatants', {})).toBe('Defeat {var:42} combatants');
+  });
+
+  it('drops invisible objectives', () => {
+    vi.mocked(getDef).mockReturnValue({ progressDescription: 'Hidden' });
+    expect(objectiveLine({ objectiveHash: 1, progress: 0, completionValue: 1, visible: false }, {}))
+      .toBeUndefined();
+  });
+});
+
+describe('buildArtifact', () => {
+  it('reports power bonus, points and progress to the next point', () => {
+    expect(buildArtifact({
+      artifactHash: 7, powerBonus: 12, pointsAcquired: 19,
+      pointProgression: { progressToNextLevel: 8400, nextLevelAt: 12000 },
+    })).toEqual({ name: 'Item7', powerBonus: 12, pointsAcquired: 19, nextPointAt: '8400/12000' });
+  });
+
+  it('returns undefined when no artifact is equipped', () => {
+    expect(buildArtifact(undefined)).toBeUndefined();
   });
 });

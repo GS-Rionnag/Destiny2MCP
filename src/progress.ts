@@ -1,4 +1,4 @@
-import { getDef } from './manifest.js';
+import { defName, getDef } from './manifest.js';
 
 /**
  * The ranks worth printing by default. Chosen by hand: the manifest holds 172 progression
@@ -81,5 +81,31 @@ export function resolveSeasonPass(
     tier: reward.level ?? 0,
     progress: progressString(reward),
     prestigeTier: prestige?.level ? prestige.level : null,
+  };
+}
+
+/** Bungie objective text embeds live numbers as {var:<hash>}; StringVariables holds the values. */
+export const substituteVars = (text: string, vars: Record<string, number>): string =>
+  text.replace(/\{var:(\d+)\}/g, (token, hash) => {
+    const v = vars?.[hash];
+    return v === undefined ? token : String(v);
+  });
+
+export function objectiveLine(o: any, vars: Record<string, number>): string | undefined {
+  if (o?.visible === false) return undefined;
+  const def = getDef('DestinyObjectiveDefinition', o.objectiveHash);
+  const text = def?.progressDescription || def?.displayProperties?.name || `#${o.objectiveHash}`;
+  return `${o.progress ?? 0}/${o.completionValue ?? 0} ${substituteVars(text, vars)}`.trim();
+}
+
+export type Artifact = { name: string; powerBonus: number; pointsAcquired: number; nextPointAt?: string };
+
+export function buildArtifact(art: any): Artifact | undefined {
+  if (!art?.artifactHash) return undefined;
+  return {
+    name: defName('DestinyInventoryItemDefinition', art.artifactHash),
+    powerBonus: art.powerBonus ?? 0,
+    pointsAcquired: art.pointsAcquired ?? 0,
+    nextPointAt: art.pointProgression ? progressString(art.pointProgression) : undefined,
   };
 }
