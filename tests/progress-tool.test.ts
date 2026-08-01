@@ -63,6 +63,30 @@ describe('get_progress', () => {
     expect(out.characters.map((c: any) => c.character.characterId)).toEqual(['C1', 'C2']);
   });
 
+  it('reads the artifact from the profile-scoped component, never the character-scoped one', async () => {
+    vi.mocked(bungieFetch).mockResolvedValue({
+      ...profile,
+      profileProgression: {
+        data: {
+          seasonalArtifact: {
+            artifactHash: 7, powerBonus: 12, pointsAcquired: 19,
+            pointProgression: { progressToNextLevel: 8400, nextLevelAt: 12000 },
+          },
+        },
+      },
+      characterProgressions: {
+        // Character-scoped artifact (component 202) only carries artifactHash/pointsUsed/tiers —
+        // preferring it yields confident zeros.
+        data: { C1: {}, C2: { seasonalArtifact: { artifactHash: 7, pointsUsed: 12 } } },
+      },
+    } as any);
+
+    const out = parse(await capture().get_progress({ ...args }));
+    expect(out.artifact).toEqual({
+      name: 'Item7', powerBonus: 12, pointsAcquired: 19, nextPointAt: '8400/12000',
+    });
+  });
+
   it('notes a missing progressions component instead of failing', async () => {
     vi.mocked(bungieFetch).mockResolvedValue({ ...profile, characterProgressions: undefined } as any);
     const out = parse(await capture().get_progress({ ...args }));

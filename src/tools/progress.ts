@@ -82,7 +82,9 @@ Compact by default: only the six ranks worth reading, completed rows hidden but 
         set('seasonPass', resolveSeasonPass(r.profile?.data?.currentSeasonHash, prog.progressions, new Date()));
       }
       if (want('artifact')) {
-        set('artifact', buildArtifact(prog?.seasonalArtifact ?? r.profileProgression?.data?.seasonalArtifact));
+        // Profile-scoped (component 104) only: the character-scoped artifact (202) carries just
+        // artifactHash/pointsUsed/tiers, so feeding it to buildArtifact yields confident zeros.
+        set('artifact', buildArtifact(r.profileProgression?.data?.seasonalArtifact));
       }
       if (want('milestones') && prog?.milestones) {
         const m = buildMilestones(prog.milestones, include_complete);

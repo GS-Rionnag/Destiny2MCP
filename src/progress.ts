@@ -158,7 +158,7 @@ const BOUNTY_KINDS: Record<number, string> = { 26: 'Bounty', 12: 'QuestStep' };
 export function buildBounties(
   items: any[],
   instanced: Record<string, { objectives?: any[] }>,
-  uninstanced: Record<string, { objectives?: any[] }>,
+  uninstanced: Record<string, any[]>,
   vars: Record<string, number>,
   { includeComplete = false, limit = 25 }: { includeComplete?: boolean; limit?: number } = {},
 ): { rows: Bounty[]; hiddenComplete: number } {
@@ -170,11 +170,12 @@ export function buildBounties(
     const kind = BOUNTY_KINDS[def?.itemType];
     if (!kind) continue;
 
-    // Instanced bounties carry objectives under their instance id; uninstanced ones are keyed
-    // by item hash on the character progression component. Both are real, so read both.
+    // Instanced bounties carry objectives under their instance id; uninstanced ones live on the
+    // character progression component, which maps itemHash DIRECTLY to an objectives array —
+    // no wrapper object. Both are real, so read both.
     const objs: any[] = (it.itemInstanceId
       ? instanced?.[it.itemInstanceId]?.objectives
-      : uninstanced?.[it.itemHash]?.objectives) ?? [];
+      : uninstanced?.[it.itemHash]) ?? [];
     const visible = objs.filter((o) => o.visible !== false);
 
     const complete = visible.length > 0 && visible.every((o) => o.complete === true);

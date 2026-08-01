@@ -202,7 +202,8 @@ describe('buildBounties', () => {
     const { rows } = buildBounties(
       [{ itemHash: 55 }],
       {},
-      { '55': { objectives: [{ objectiveHash: 9, progress: 5, completionValue: 10 }] } },
+      // uninstancedItemObjectives maps itemHash directly to an objectives ARRAY — no wrapper.
+      { '55': [{ objectiveHash: 9, progress: 5, completionValue: 10 }] },
       {},
     );
 
