@@ -87,7 +87,7 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (24)
+## Tools (26)
 
 ### Read (13)
 
@@ -126,7 +126,11 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 
 | Tool | Description |
 |------|-------------|
-| `bungie_api_call` | Escape hatch: call ANY Bungie.net Platform endpoint directly (https://bungie-net.github.io/multi lists all ~150). path is relative to /Platform, e.g. "/Destiny2/Manifest/". Prefer the specific tools when one fits; responses here are raw JSON with unresolved hashes. |
+| `list_endpoints` | Index of all 135 Bungie Platform endpoints from Bungie's own OpenAPI spec — names only. Filter by `search` or `tag`. Saves the model from reading the online API docs. |
+| `describe_endpoint` | One endpoint's full signature: parameters, request body shape, OAuth scope, response type. |
+| `bungie_api_call` | Escape hatch: call ANY Bungie.net Platform endpoint directly. path is relative to /Platform, e.g. "/Destiny2/Manifest/". Prefer the specific tools when one fits; responses here are raw JSON with unresolved hashes. |
+
+The spec behind the first two is downloaded once (1.8MB) to `data/openapi.json` on first use. Delete that file to pick up Bungie's latest.
 
 ## Known Bungie limits
 

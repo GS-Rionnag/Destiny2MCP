@@ -25,7 +25,7 @@ function logCalls(body: unknown, bytes: number, ms: number) {
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.1.0' });
+  const server = new McpServer({ name: 'destiny2', version: '1.2.0' });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
