@@ -16,7 +16,7 @@ export function itemSummary(item: any, instances?: Record<string, any>) {
     itemInstanceId: item.itemInstanceId,
     type: def?.itemTypeDisplayName,
     tier: def?.inventory?.tierTypeName,
-    power: itemPower(inst),
+    ...itemPower(inst, def, item.bucketHash),
     quantity: item.quantity > 1 ? item.quantity : undefined,
   };
 }
@@ -236,6 +236,8 @@ ${SEARCH_HELP}`,
         type: i.type,
         tier: i.tier,
         power: i.power,
+        // A sparrow has no power, but it does have a Speed — name it rather than drop it.
+        primaryStat: i.primaryStat,
         quantity: i.quantity > 1 ? i.quantity : undefined,
         location: i.location,
         characterId: i.characterId,
@@ -335,7 +337,8 @@ For "what did I just get" in a normal conversation use search_inventory with sor
       });
       const inst = r.instance?.data;
       const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
-      const socketEntries: any[] = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
+      const def = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0);
+      const socketEntries: any[] = def?.sockets?.socketEntries ?? [];
       // Default of 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up a
       // whole-item response; option_offset/nextOffset make the rest reachable when you actually want them.
       const options = (i: number) => {
@@ -380,7 +383,7 @@ For "what did I just get" in a normal conversation use search_inventory with sor
       return {
         itemInstanceId: item_instance_id,
         name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
-        power: itemPower(inst),
+        ...itemPower(inst, def, r.item?.data?.bucketHash),
         godroll: match ? {
           match: match.match, perks: match.perks, tags: match.tags, source: match.source,
           swap: match.swap, rollsMatched: match.rollsMatched,

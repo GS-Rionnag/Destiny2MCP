@@ -8,7 +8,8 @@ import { buildItems, compileQuery, resetKeywordCache, sortItems, type SearchItem
 import { lexer, parseQuery } from '../src/search/query-parser.js';
 
 const WEAPON = 1, ARMOR = 20, HAND_CANNON = 6, HELMET = 45;
-const RESILIENCE = 392767087, MOBILITY = 2996146975;
+const RESILIENCE = 392767087, MOBILITY = 2996146975, SPEED = 1501155019;
+const SUBCLASS_BUCKET = 3284755031, ARTIFACT_BUCKET = 1506418338;
 
 // Hashes: 100 exotic hand cannon, 101 legendary hunter helmet, 102 a second copy of 100
 const ITEMS: Record<number, any> = {
@@ -50,6 +51,7 @@ beforeAll(() => {
   // Armor 3.0 names, as the live manifest has them — 'resilience'/'mobility' only work via alias
   insert('DestinyStatDefinition', RESILIENCE, { hash: RESILIENCE, displayProperties: { name: 'Health' } });
   insert('DestinyStatDefinition', MOBILITY, { hash: MOBILITY, displayProperties: { name: 'Weapons' } });
+  insert('DestinyStatDefinition', SPEED, { hash: SPEED, displayProperties: { name: 'Speed' } });
   insert('DestinyClassDefinition', 671679327, { hash: 671679327, displayProperties: { name: 'Hunter' } });
   db.close();
 
@@ -137,28 +139,37 @@ describe('buildItems', () => {
     expect(items().find((i) => i.itemInstanceId === 'w1')!.plugs).toEqual(['incandescent']);
   });
 
-  it('reports power only for Attack/Defense/Power, the way DIM does', () => {
-    // Bungie hangs a primaryStat off things with no power: a sparrow's is Speed, a ghost's is
-    // Power Bonus, and a subclass gets a random armor stat that can read negative.
+  it('reports power only for Attack/Defense/Power, and names the other stats, the way DIM does', () => {
+    // Bungie hangs a primaryStat off things with no power: a sparrow's is Speed, and a subclass
+    // gets one of its own stat modifiers picked at random, which can read negative.
     const profile = structuredClone(PROFILE) as any;
     profile.profileInventory.data.items.push(
-      { itemHash: 100, itemInstanceId: 'sparrow', quantity: 1, bucketHash: 138197802, state: 0 },
-      { itemHash: 100, itemInstanceId: 'subclass', quantity: 1, bucketHash: 138197802, state: 0 },
-      { itemHash: 100, itemInstanceId: 'ghost', quantity: 1, bucketHash: 138197802, state: 0 },
+      { itemHash: 100, itemInstanceId: 'sparrow', quantity: 1, bucketHash: 2025709351, state: 0 },
+      { itemHash: 100, itemInstanceId: 'subclass', quantity: 1, bucketHash: SUBCLASS_BUCKET, state: 0 },
+      { itemHash: 100, itemInstanceId: 'artifact', quantity: 1, bucketHash: ARTIFACT_BUCKET, state: 0 },
     );
     Object.assign(profile.itemComponents.instances.data, {
-      sparrow: { primaryStat: { statHash: 1501155019, value: 190 } },   // Speed
-      subclass: { primaryStat: { statHash: 392767087, value: -10 } },   // Health, negative
-      ghost: { primaryStat: { statHash: 3289069874, value: 21 } },      // Power Bonus
+      sparrow: { primaryStat: { statHash: SPEED, value: 190 } },
+      subclass: { primaryStat: { statHash: RESILIENCE, value: -10 } },
+      artifact: { primaryStat: { statHash: 3289069874, value: 21 } }, // Power Bonus
     });
     const built = buildItems(profile);
-    for (const id of ['sparrow', 'subclass', 'ghost']) {
-      expect(built.find((i) => i.itemInstanceId === id)!.power).toBeUndefined();
+    const of = (id: string) => built.find((i) => i.itemInstanceId === id)!;
+
+    // A sparrow has no power — but its Speed is kept, under its own name.
+    expect(of('sparrow').power).toBeUndefined();
+    expect(of('sparrow').primaryStat).toEqual({ name: 'Speed', value: 190 });
+    // Subclass and artifact primary stats are dropped entirely: the subclass's six real stats
+    // already come through component 304, so echoing one of them back is noise on a duplicate.
+    for (const id of ['subclass', 'artifact']) {
+      expect(of(id).power).toBeUndefined();
+      expect(of(id).primaryStat).toBeUndefined();
     }
-    expect(built.find((i) => i.itemInstanceId === 'w1')!.power).toBe(1900);
-    // ...so they cannot leak into is:haspower or a power sort either.
-    const powered = built.filter(compileQuery('is:haspower').predicate).map((i) => i.itemInstanceId);
-    expect(powered).toEqual(['w1', 'w2', 'a1', 'a2']);
+    expect(of('w1').power).toBe(1900);
+    expect(of('w1').primaryStat).toBeUndefined();
+    // ...so none of them leak into is:haspower or a power sort either.
+    expect(built.filter(compileQuery('is:haspower').predicate).map((i) => i.itemInstanceId))
+      .toEqual(['w1', 'w2', 'a1', 'a2']);
   });
 });
 

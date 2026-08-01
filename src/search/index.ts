@@ -10,6 +10,8 @@ export interface SearchItem {
   type?: string;
   tier: string;
   power?: number;
+  /** Set instead of power for items that have no power — a sparrow's Speed, a ship's Speed. */
+  primaryStat?: { name: string; value: number };
   quantity: number;
   location: string;
   characterId?: string;
@@ -52,14 +54,41 @@ const OLD_STAT_NAMES: Record<string, number> = {
 };
 
 // Attack, Defense, Power — DIM's `lightStats` (app/search/search-filter-values.ts). Bungie puts a
-// primaryStat on plenty of things that have no power: a sparrow's is Speed, a ghost's is Power
-// Bonus, and a subclass gets a random armor stat that can read NEGATIVE. Reporting any of those as
-// "power" is wrong, so like DIM we only call it power when it is one of these three.
+// primaryStat on plenty of things that have no power: a sparrow's is Speed, the artifact's is
+// Power Bonus, and a subclass gets a random armor stat that can read NEGATIVE. Reporting any of
+// those as "power" is wrong, so like DIM we only call it power when it is one of these three.
 const LIGHT_STATS = new Set([1480404414, 3897883278, 1935470627]);
+// DIM drops primaryStat outright for these two buckets (d2-item-factory.ts). It earns its keep: a
+// subclass's primaryStat is one of its own stat modifiers picked at random, and component 304
+// already reports all six properly, so echoing it back would be noise on top of a duplicate.
+const SUBCLASS_BUCKET = 3284755031;
+const ARTIFACT_BUCKET = 1506418338;
 
-/** An item's power level, or undefined for items that do not have one. */
-export const itemPower = (inst: any): number | undefined =>
-  inst?.primaryStat && LIGHT_STATS.has(inst.primaryStat.statHash) ? inst.primaryStat.value : undefined;
+const statDisplayNames = new Map<number, string>();
+const statDisplayName = (hash: number) => {
+  if (!statDisplayNames.has(hash)) statDisplayNames.set(hash, defName('DestinyStatDefinition', hash));
+  return statDisplayNames.get(hash)!;
+};
+
+export interface ItemPower {
+  /** Power level, for the weapons and armor that have one. */
+  power?: number;
+  /** The stat Bungie gives instead, for items with no power — a sparrow's Speed, a ship's Speed. */
+  primaryStat?: { name: string; value: number };
+}
+
+/**
+ * Split an instance's primaryStat into power vs "some other stat, named", following DIM's rule in
+ * app/inventory/store/d2-item-factory.ts.
+ */
+export function itemPower(inst: any, def?: any, bucketHash?: number): ItemPower {
+  const p = inst?.primaryStat;
+  if (!p) return {};
+  if (bucketHash === SUBCLASS_BUCKET || bucketHash === ARTIFACT_BUCKET) return {};
+  if (def?.stats?.disablePrimaryStatDisplay) return {};
+  if (LIGHT_STATS.has(p.statHash)) return { power: p.value };
+  return { primaryStat: { name: statDisplayName(p.statHash), value: p.value } };
+}
 
 const DAMAGE_TYPES: Record<string, number> = { kinetic: 1, arc: 2, solar: 3, void: 4, stasis: 6, strand: 7 };
 const AMMO_TYPES: Record<string, number> = { primary: 1, special: 2, heavy: 3 };
@@ -137,6 +166,7 @@ export function resetKeywordCache(): void {
   statKeywords = null;
   statNameByHash = null;
   armorStatNames = null;
+  statDisplayNames.clear();
 }
 
 /** Flatten a profile response (SEARCH_COMPONENTS) into filterable items. */
@@ -185,7 +215,7 @@ export function buildItems(r: any): SearchItem[] {
       itemInstanceId: item.itemInstanceId,
       type: d?.itemTypeDisplayName,
       tier: (d?.inventory?.tierTypeName ?? '').toLowerCase(),
-      power: itemPower(inst),
+      ...itemPower(inst, d, item.bucketHash),
       quantity: item.quantity ?? 1,
       location,
       characterId,
