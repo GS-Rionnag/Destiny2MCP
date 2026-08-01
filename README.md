@@ -96,7 +96,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `get_profile` | Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer. |
 | `get_character` | One character in detail: stats (Mobility etc.) and all currently equipped items with power. |
 | `search_inventory` | Search ALL items across every character and the vault. Filter by name and/or item type substring (e.g. "Rocket Launcher", "Helmet"). Returns instance ids needed by transfer/equip tools. |
-| `get_item_details` | Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. |
+| `get_item_details` | Full detail for up to 15 item instances in one call: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. A bad id is reported in place, not fatal. |
 | `get_vendors` | List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock. |
 | `get_vendor_items` | One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386). |
 | `get_loadouts` | In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout. |

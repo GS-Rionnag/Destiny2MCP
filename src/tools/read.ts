@@ -98,7 +98,8 @@ export function registerReadTools(server: McpServer): void {
     inputSchema: z.object({
       name: z.string().optional().describe('Case-insensitive name substring'),
       type: z.string().optional().describe('Case-insensitive item type substring, e.g. "Hand Cannon"'),
-      limit: z.number().int().min(1).max(200).default(50),
+      // Clamped, not rejected: a model guessing limit:500 should get 200 items, not a wasted turn
+      limit: z.number().int().min(1).transform((n) => Math.min(n, 200)).default(50),
     }),
   }, tool(async ({ name, type, limit }) => {
     const r = await bungieFetch<any>(`${await profilePath()}/`, {
@@ -128,56 +129,67 @@ export function registerReadTools(server: McpServer): void {
   }));
 
   server.registerTool('get_item_details', {
-    description: 'Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. Set include_plug_options to also list what each socket ACCEPTS — do that before insert_plug instead of guessing socket indexes.',
+    description: 'Full detail for item instances: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. Pass every instance id you care about in one call — do not call this once per item. Set include_plug_options to also list what each socket ACCEPTS (bigger response — pair it with socket_index, and with few ids), so you never have to guess a socket index.',
     inputSchema: z.object({
-      item_instance_id: z.string(),
-      include_plug_options: z.boolean().default(false).describe('List insertable plugs per socket (bigger response)'),
+      item_instance_ids: z.array(z.string()).min(1).max(15),
+      include_plug_options: z.boolean().default(false).describe('List insertable plugs per socket (much bigger response)'),
       socket_index: z.number().int().min(0).optional().describe('Limit plug options to this one socket — much smaller than listing every socket'),
     }),
-  }, tool(async ({ item_instance_id, include_plug_options, socket_index }) => {
-    const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
-      auth: true, query: { components: include_plug_options ? '300,302,304,305,307,310' : '300,302,304,305,307' },
-    });
-    const inst = r.instance?.data;
-    const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
-    const socketEntries: any[] = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
-    // ponytail: 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up the response
-    const options = (i: number) => {
-      if (!include_plug_options || (socket_index !== undefined && i !== socket_index)) return undefined;
-      // The API only fills reusablePlugs for weapon-style sockets; armor mods and subclass
-      // fragments have to come from the manifest plug set the socket points at.
-      let hashes: number[] = (reusable[String(i)] ?? []).filter((p: any) => p.canInsert).map((p: any) => p.plugItemHash);
-      if (!hashes.length) {
-        const e = socketEntries[i] ?? {};
-        const setHash = e.reusablePlugSetHash ?? e.randomizedPlugSetHash;
-        const fromSet = setHash
-          ? (getDef('DestinyPlugSetDefinition', setHash)?.reusablePlugItems ?? [])
-          : (e.reusablePlugItems ?? []);
-        hashes = fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
-      }
-      // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from
-      const byName = new Map<string, number>();
-      for (const h of hashes) {
-        const n = defName('DestinyInventoryItemDefinition', h);
-        if (!byName.has(n)) byName.set(n, h);
-      }
-      const uniq = [...byName].map(([name, hash]) => ({ hash, name }));
-      return { options: uniq.slice(0, 12), moreOptions: uniq.length > 12 ? uniq.length - 12 : undefined };
+  }, tool(async ({ item_instance_ids, include_plug_options, socket_index }) => {
+    // One bad id must not lose the other 14 — report it in place and keep going.
+    const one = async (item_instance_id: string) => {
+      const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
+        auth: true, query: { components: include_plug_options ? '300,302,304,305,307,310' : '300,302,304,305,307' },
+      });
+      const inst = r.instance?.data;
+      const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
+      const socketEntries: any[] = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
+      // ponytail: 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up the response
+      const options = (i: number) => {
+        if (!include_plug_options || (socket_index !== undefined && i !== socket_index)) return undefined;
+        // The API only fills reusablePlugs for weapon-style sockets; armor mods and subclass
+        // fragments have to come from the manifest plug set the socket points at.
+        let hashes: number[] = (reusable[String(i)] ?? []).filter((p: any) => p.canInsert).map((p: any) => p.plugItemHash);
+        if (!hashes.length) {
+          const e = socketEntries[i] ?? {};
+          const setHash = e.reusablePlugSetHash ?? e.randomizedPlugSetHash;
+          const fromSet = setHash
+            ? (getDef('DestinyPlugSetDefinition', setHash)?.reusablePlugItems ?? [])
+            : (e.reusablePlugItems ?? []);
+          hashes = fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
+        }
+        // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from
+        const byName = new Map<string, number>();
+        for (const h of hashes) {
+          const n = defName('DestinyInventoryItemDefinition', h);
+          if (!byName.has(n)) byName.set(n, h);
+        }
+        const uniq = [...byName].map(([name, hash]) => ({ hash, name }));
+        return { options: uniq.slice(0, 12), moreOptions: uniq.length > 12 ? uniq.length - 12 : undefined };
+      };
+      return {
+        itemInstanceId: item_instance_id,
+        name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
+        power: inst?.primaryStat?.value,
+        energy: inst?.energy ? { used: inst.energy.energyUsed, capacity: inst.energy.energyCapacity } : undefined,
+        stats: Object.fromEntries(Object.entries<any>(r.stats?.data?.stats ?? {})
+          .map(([h, s]) => [defName('DestinyStatDefinition', Number(h)), s.value])),
+        sockets: (r.sockets?.data?.sockets ?? []).map((s: any, i: number) => ({
+          socketIndex: i,
+          plug: s.plugHash ? defName('DestinyInventoryItemDefinition', s.plugHash) : null,
+          plugHash: s.plugHash,
+          enabled: s.isEnabled,
+          ...options(i),
+        })),
+      };
     };
-    return {
-      name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
-      power: inst?.primaryStat?.value,
-      energy: inst?.energy ? { used: inst.energy.energyUsed, capacity: inst.energy.energyCapacity } : undefined,
-      stats: Object.fromEntries(Object.entries<any>(r.stats?.data?.stats ?? {})
-        .map(([h, s]) => [defName('DestinyStatDefinition', Number(h)), s.value])),
-      sockets: (r.sockets?.data?.sockets ?? []).map((s: any, i: number) => ({
-        socketIndex: i,
-        plug: s.plugHash ? defName('DestinyInventoryItemDefinition', s.plugHash) : null,
-        plugHash: s.plugHash,
-        enabled: s.isEnabled,
-        ...options(i),
-      })),
-    };
+
+    const out = [];
+    for (const id of item_instance_ids) {
+      try { out.push(await one(id)); }
+      catch (e: any) { out.push({ itemInstanceId: id, error: e?.message ?? String(e) }); }
+    }
+    return out;
   }));
 
   server.registerTool('get_vendors', {
@@ -323,7 +335,7 @@ export function registerReadTools(server: McpServer): void {
     inputSchema: z.object({
       query: z.string(),
       table: z.string().default('DestinyInventoryItemDefinition'),
-      limit: z.number().int().min(1).max(100).default(25),
+      limit: z.number().int().min(1).transform((n) => Math.min(n, 100)).default(25),
     }),
   }, tool(async ({ query, table, limit }) => searchDefs(query, table, limit)));
 

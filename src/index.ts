@@ -23,9 +23,35 @@ function logCalls(body: unknown, bytes: number, ms: number) {
   }
 }
 
+// Shown to the model once per session. Everything here is something it otherwise
+// has to learn by trial and error, in every new conversation, forever.
+const INSTRUCTIONS = `Destiny 2 account control via the Bungie API.
+
+Batch your calls — every extra round trip is a full turn:
+- get_item_details takes item_instance_ids (up to 15), not one id
+- insert_plug takes a plugs array — send a whole item's mods at once
+- get_definition takes up to 50 hashes
+
+Pick the right tool:
+- Names/descriptions for a hash: get_definition. It reads a local copy of the
+  manifest — instant and far smaller than fetching /Destiny2/Manifest/ over the API.
+- Which Bungie endpoint exists: list_endpoints then describe_endpoint. Do not go
+  read the online API docs.
+- bungie_api_call is a last resort for endpoints no other tool covers.
+
+Before socketing mods, call get_item_details with include_plug_options and a
+socket_index — it tells you exactly what that socket accepts. Do not guess indexes.
+
+Equipping and socketing only work when the character is in orbit, in a social
+space, or offline. "You must either be logged off or in orbit" means the player
+is in an activity, not that the call was wrong.
+
+GET responses are cached for 60s, so re-reading something you just read is cheap,
+and any write clears the cache.`;
+
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.2.0' });
+  const server = new McpServer({ name: 'destiny2', version: '1.3.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
