@@ -103,7 +103,7 @@ export type Artifact = { name: string; powerBonus: number; pointsAcquired: numbe
 export function buildArtifact(art: any): Artifact | undefined {
   if (!art?.artifactHash) return undefined;
   return {
-    name: defName('DestinyInventoryItemDefinition', art.artifactHash),
+    name: defName('DestinyArtifactDefinition', art.artifactHash),
     powerBonus: art.powerBonus ?? 0,
     pointsAcquired: art.pointsAcquired ?? 0,
     nextPointAt: art.pointProgression ? progressString(art.pointProgression) : undefined,

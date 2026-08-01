@@ -10,6 +10,7 @@ const { getDef, defName } = await import('../src/manifest.js');
 
 beforeEach(() => {
   vi.mocked(getDef).mockReset().mockReturnValue(undefined);
+  vi.mocked(defName).mockClear();
 });
 
 describe('buildRanks', () => {
@@ -125,6 +126,7 @@ describe('buildArtifact', () => {
       artifactHash: 7, powerBonus: 12, pointsAcquired: 19,
       pointProgression: { progressToNextLevel: 8400, nextLevelAt: 12000 },
     })).toEqual({ name: 'Item7', powerBonus: 12, pointsAcquired: 19, nextPointAt: '8400/12000' });
+    expect(vi.mocked(defName)).toHaveBeenCalledWith('DestinyArtifactDefinition', 7);
   });
 
   it('returns undefined when no artifact is equipped', () => {
