@@ -10,6 +10,7 @@ import { readTokens } from './auth.js';
 import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerRawTool } from './tools/raw.js';
+import { registerProgressTools } from './tools/progress.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
@@ -42,6 +43,10 @@ For a recurring or scheduled check ("tell me what dropped"), use get_new_items, 
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
 reports each drop exactly once even though the run that calls it remembers nothing.
 
+For "what should I do today", "what are my ranks" or "did I do my weekly", use get_progress.
+get_milestones only knows the PUBLIC weekly reset list — it cannot tell you what THIS account
+has already cleared.
+
 Pick the right tool:
 - Names/descriptions for a hash: get_definition. It reads a local copy of the
   manifest — instant and far smaller than fetching /Destiny2/Manifest/ over the API.
@@ -62,10 +67,11 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.7.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.8.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
+  registerProgressTools(server);
   return server;
 }
 
