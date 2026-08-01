@@ -460,7 +460,7 @@ For "what did I just get" in a normal conversation use search_inventory with sor
   }));
 
   server.registerTool('get_loadouts', {
-    description: 'In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout.',
+    description: 'In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout / rename_loadout / clear_loadout.',
     inputSchema: z.object({}),
   }, tool(async () => {
     const r = await bungieFetch<any>(`${await profilePath()}/`, { auth: true, query: { components: '206,200' } });
@@ -474,7 +474,8 @@ For "what did I just get" in a normal conversation use search_inventory with sor
         const ids = (lo.items ?? []).map((it: any) => it.itemInstanceId).filter((id: string) => id && id !== '0');
         return {
           loadoutIndex: i,
-          name: getDef('DestinyLoadoutNameDefinition', lo.nameHash)?.displayProperties?.name ?? null,
+          // LoadoutNameDefinition keeps the name at the top level, not under displayProperties
+          name: getDef('DestinyLoadoutNameDefinition', lo.nameHash)?.name ?? null,
           empty: !ids.length,
           itemInstanceIds: ids,
         };

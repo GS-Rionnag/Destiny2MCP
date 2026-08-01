@@ -1,10 +1,35 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
-import { defName, firstHash, getDef, searchDefs } from '../manifest.js';
+import { defName, eachDef, firstHash, getDef, searchDefs } from '../manifest.js';
 import { tool } from './util.js';
 
 const ACTIONS = '/Destiny2/Actions';
+
+// Loadout names are not free text — the game only allows 22 fixed words, each its own definition
+// row (with the name at the top level, not under displayProperties).
+export function resolveLoadoutName(name: string): number {
+  const rows = eachDef('DestinyLoadoutNameDefinition');
+  const hit = rows.find((d) => d.name?.toLowerCase() === name.toLowerCase());
+  if (!hit) {
+    throw new Error(
+      `Loadout names come from a fixed in-game list — "${name}" is not on it. Pick one of: ${rows.map((d) => d.name).join(', ')}`);
+  }
+  return hit.hash;
+}
+
+/** Bungie's update endpoint takes all three identifiers, so read the current ones and merge. */
+async function currentLoadout(characterId: string, index: number) {
+  const a = await getAccount();
+  const r = await bungieFetch<any>(`/Destiny2/${a.membershipType}/Profile/${a.membershipId}/`, {
+    auth: true, query: { components: '206' },
+  });
+  const loadouts = r.characterLoadouts?.data?.[characterId]?.loadouts;
+  if (!loadouts) throw new Error(`No loadouts for character ${characterId} — check character_id.`);
+  const lo = loadouts[index];
+  if (!lo) throw new Error(`Loadout index ${index} does not exist (character has ${loadouts.length} slots).`);
+  return lo;
+}
 
 export function resolvePlugHash(plug: string): number {
   if (/^\d+$/.test(plug)) return Number(plug);
@@ -89,18 +114,50 @@ export function registerWriteTools(server: McpServer): void {
     inputSchema: z.object({
       loadout_index: z.number().int().min(0),
       character_id: z.string(),
-      name_hash: z.number().int().optional().describe('DestinyLoadoutNameDefinition hash; default = first'),
+      name: z.string().optional().describe('One of the fixed in-game names, e.g. "Raid", "PvP", "Prismatic"'),
+      name_hash: z.number().int().optional().describe('DestinyLoadoutNameDefinition hash; use name instead'),
       color_hash: z.number().int().optional(),
       icon_hash: z.number().int().optional(),
     }),
-  }, tool(async ({ loadout_index, character_id, name_hash, color_hash, icon_hash }) => {
+  }, tool(async ({ loadout_index, character_id, name, name_hash, color_hash, icon_hash }) => {
     await post(`${ACTIONS}/Loadouts/SnapshotLoadout/`, {
       loadoutIndex: loadout_index, characterId: character_id,
-      nameHash: name_hash ?? firstHash('DestinyLoadoutNameDefinition'),
+      nameHash: (name ? resolveLoadoutName(name) : name_hash) ?? firstHash('DestinyLoadoutNameDefinition'),
       colorHash: color_hash ?? firstHash('DestinyLoadoutColorDefinition'),
       iconHash: icon_hash ?? firstHash('DestinyLoadoutIconDefinition'),
     });
-    return `Saved current gear to loadout slot ${loadout_index}.`;
+    return `Saved current gear to loadout slot ${loadout_index}${name ? ` as "${name}"` : ''}.`;
+  }));
+
+  server.registerTool('rename_loadout', {
+    description: 'Rename / re-color / re-icon an existing loadout slot without touching its items. Names are a fixed in-game list (Raid, Dungeon, PvP, Trials, Nightfall, Strike, Gambit, Crucible, Vanguard, PvE, Support, Prismatic, Solar, Arc, Void, Stasis, Strand, Alpha, Beta, Gamma, Delta, Epsilon) — anything else is rejected with the list. Unspecified fields keep their current value.',
+    inputSchema: z.object({
+      loadout_index: z.number().int().min(0),
+      character_id: z.string(),
+      name: z.string().optional(),
+      color_hash: z.number().int().optional().describe('DestinyLoadoutColorDefinition hash'),
+      icon_hash: z.number().int().optional().describe('DestinyLoadoutIconDefinition hash'),
+    }),
+  }, tool(async ({ loadout_index, character_id, name, color_hash, icon_hash }) => {
+    if (!name && color_hash === undefined && icon_hash === undefined) {
+      throw new Error('Nothing to change — pass at least one of name, color_hash, icon_hash.');
+    }
+    const cur = await currentLoadout(character_id, loadout_index);
+    await post(`${ACTIONS}/Loadouts/UpdateLoadoutIdentifiers/`, {
+      loadoutIndex: loadout_index, characterId: character_id,
+      nameHash: name ? resolveLoadoutName(name) : cur.nameHash,
+      colorHash: color_hash ?? cur.colorHash,
+      iconHash: icon_hash ?? cur.iconHash,
+    });
+    return `Loadout slot ${loadout_index} updated${name ? ` — now "${name}"` : ''}.`;
+  }));
+
+  server.registerTool('clear_loadout', {
+    description: 'Empty a loadout slot: wipes its items AND its name/color/icon, freeing the slot. The gear itself is untouched — only the saved loadout goes away. Not reversible; snapshot_loadout would have to rebuild it.',
+    inputSchema: z.object({ loadout_index: z.number().int().min(0), character_id: z.string() }),
+  }, tool(async ({ loadout_index, character_id }) => {
+    await post(`${ACTIONS}/Loadouts/ClearLoadout/`, { loadoutIndex: loadout_index, characterId: character_id });
+    return `Loadout slot ${loadout_index} cleared.`;
   }));
 
   server.registerTool('pull_from_postmaster', {

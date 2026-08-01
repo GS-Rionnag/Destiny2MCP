@@ -183,8 +183,9 @@ describe('get_loadouts', () => {
 
   it('marks a zero-filled slot empty and leaves an unset name null', async () => {
     vi.mocked(getDef).mockImplementation((table: string, hash: number) =>
+      // real shape: LoadoutNameDefinition has no displayProperties, the name sits at the top level
       table === 'DestinyLoadoutNameDefinition' && hash === 500
-        ? { displayProperties: { name: 'PvP' } } : undefined);
+        ? { name: 'PvP', hash: 500 } : undefined);
     vi.mocked(bungieFetch).mockImplementation(async () => profile as any);
     const [c] = parse(await capture().get_loadouts({}));
     expect(c.loadouts[0]).toMatchObject({ name: 'PvP', empty: false, itemInstanceIds: ['123'] });

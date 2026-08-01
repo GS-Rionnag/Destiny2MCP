@@ -7,6 +7,7 @@ vi.mock('../src/bungie.js', () => ({
 }));
 vi.mock('../src/manifest.js', () => ({
   searchDefs: vi.fn((q: string) => (q === 'Sunshot' ? [{ hash: 555, name: 'Sunshot' }] : [])),
+  eachDef: vi.fn(() => [{ name: 'Raid', hash: 900 }, { name: 'PvP', hash: 901 }]),
   firstHash: vi.fn(() => 111),
   defName: vi.fn(() => 'X'),
   getDef: vi.fn((_t: string, hash: number) => hash === 777
@@ -88,6 +89,49 @@ describe('write tools', () => {
       },
     });
     expect(res.content[0].text).toContain('Already equipped');
+  });
+
+  it('rename_loadout keeps the identifiers it was not given', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) =>
+      (path.includes('/Profile/')
+        ? { characterLoadouts: { data: { C1: { loadouts: [{ nameHash: 1, colorHash: 2, iconHash: 3 }] } } } }
+        : {}) as any);
+    await capture().rename_loadout({ loadout_index: 0, character_id: 'C1', name: 'raid' });
+    expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Loadouts/UpdateLoadoutIdentifiers/', {
+      method: 'POST', auth: true,
+      body: { loadoutIndex: 0, characterId: 'C1', nameHash: 900, colorHash: 2, iconHash: 3, membershipType: 3 },
+    });
+  });
+
+  it('rename_loadout rejects a name that is not on the in-game list, and lists the real ones', async () => {
+    const res = await capture().rename_loadout({ loadout_index: 0, character_id: 'C1', name: 'Boss DPS' });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/Raid, PvP/);
+    expect(vi.mocked(bungieFetch).mock.calls.filter(([p]) => p.includes('UpdateLoadoutIdentifiers'))).toHaveLength(0);
+  });
+
+  it('rename_loadout refuses an index the character does not have', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async () =>
+      ({ characterLoadouts: { data: { C1: { loadouts: [{ nameHash: 1 }] } } } }) as any);
+    const res = await capture().rename_loadout({ loadout_index: 9, character_id: 'C1', name: 'Raid' });
+    expect(res.isError).toBe(true);
+    expect(vi.mocked(bungieFetch).mock.calls.filter(([p]) => p.includes('UpdateLoadoutIdentifiers'))).toHaveLength(0);
+  });
+
+  it('clear_loadout posts the slot', async () => {
+    await capture().clear_loadout({ loadout_index: 3, character_id: 'C1' });
+    expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Loadouts/ClearLoadout/', {
+      method: 'POST', auth: true,
+      body: { loadoutIndex: 3, characterId: 'C1', membershipType: 3 },
+    });
+  });
+
+  it('snapshot_loadout resolves a name string to its hash', async () => {
+    await capture().snapshot_loadout({ loadout_index: 1, character_id: 'C1', name: 'PvP' });
+    expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Loadouts/SnapshotLoadout/', {
+      method: 'POST', auth: true,
+      body: { loadoutIndex: 1, characterId: 'C1', nameHash: 901, colorHash: 111, iconHash: 111, membershipType: 3 },
+    });
   });
 
   it('set_lock_state posts state', async () => {

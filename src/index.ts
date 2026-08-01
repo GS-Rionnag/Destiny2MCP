@@ -74,7 +74,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.9.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.10.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
