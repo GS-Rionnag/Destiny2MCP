@@ -5,7 +5,7 @@ vi.mock('../src/manifest.js', () => ({
   defName: vi.fn((_t: string, hash: number) => `Item${hash}`),
 }));
 
-const { buildRanks } = await import('../src/progress.js');
+const { buildRanks, resolveSeasonPass } = await import('../src/progress.js');
 const { getDef } = await import('../src/manifest.js');
 
 beforeEach(() => {
@@ -48,5 +48,55 @@ describe('buildRanks', () => {
   it('filters junk names out of the allRanks dump', () => {
     vi.mocked(getDef).mockReturnValue({ displayProperties: { name: 'XP' }, steps: [] });
     expect(buildRanks({ '999': { level: 1, progressToNextLevel: 0, nextLevelAt: 1 } }, true)).toEqual([]);
+  });
+});
+
+describe('resolveSeasonPass', () => {
+  const season = {
+    displayProperties: { name: 'Monument of Triumph' },
+    seasonPassList: [
+      { seasonPassHash: 1, seasonPassStartDate: '2025-12-02T17:00:00Z', seasonPassEndDate: '2026-06-09T17:00:00Z' },
+      { seasonPassHash: 2, seasonPassStartDate: '2026-06-09T17:00:00Z', seasonPassEndDate: '2099-01-01T17:00:00Z' },
+    ],
+  };
+
+  it('picks the pass whose date window contains now, not the first one', () => {
+    vi.mocked(getDef).mockImplementation((table: string, hash: number) => {
+      if (table === 'DestinySeasonDefinition') return season;
+      if (table === 'DestinySeasonPassDefinition' && hash === 2) {
+        return { rewardProgressionHash: 100, prestigeProgressionHash: 200 };
+      }
+      return undefined;
+    });
+
+    const out = resolveSeasonPass(2758726560, {
+      '100': { level: 84, progressToNextLevel: 2100, nextLevelAt: 4000 },
+    }, new Date('2026-08-01T00:00:00Z'));
+
+    expect(out).toEqual({
+      season: 'Monument of Triumph', tier: 84, progress: '2100/4000', prestigeTier: null,
+    });
+  });
+
+  it('reports the prestige tier once past the cap', () => {
+    vi.mocked(getDef).mockImplementation((table: string, hash: number) => {
+      if (table === 'DestinySeasonDefinition') return season;
+      if (table === 'DestinySeasonPassDefinition' && hash === 2) {
+        return { rewardProgressionHash: 100, prestigeProgressionHash: 200 };
+      }
+      return undefined;
+    });
+
+    const out = resolveSeasonPass(2758726560, {
+      '100': { level: 100, progressToNextLevel: 0, nextLevelAt: 0 },
+      '200': { level: 7, progressToNextLevel: 500, nextLevelAt: 1000 },
+    }, new Date('2026-08-01T00:00:00Z'));
+
+    expect(out?.prestigeTier).toBe(7);
+  });
+
+  it('returns undefined when the season is not in the manifest', () => {
+    vi.mocked(getDef).mockReturnValue(undefined);
+    expect(resolveSeasonPass(1, {}, new Date('2026-08-01T00:00:00Z'))).toBeUndefined();
   });
 });

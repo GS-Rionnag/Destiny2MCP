@@ -46,3 +46,40 @@ export function buildRanks(progressions: Record<string, any>, allRanks = false):
     : DEFAULT_RANKS.indexOf(a.hash) - DEFAULT_RANKS.indexOf(b.hash));
   return rows.map((r) => r.row);
 }
+
+export type SeasonPass = { season: string; tier: number; progress: string; prestigeTier: number | null };
+
+/**
+ * Season passes change several times a year, so the hash is resolved, never hardcoded:
+ * currentSeasonHash -> seasonPassList -> the entry whose date window contains now -> the pass
+ * definition's reward/prestige progression hashes. Season 28 ships two passes, which is why
+ * the first entry is not good enough. DestinySeasonDefinition.seasonPassProgressionHash is 0
+ * on current seasons and is deliberately not used as a fallback.
+ */
+export function resolveSeasonPass(
+  currentSeasonHash: number,
+  progressions: Record<string, any>,
+  now: Date,
+): SeasonPass | undefined {
+  const season = currentSeasonHash ? getDef('DestinySeasonDefinition', currentSeasonHash) : undefined;
+  if (!season) return undefined;
+
+  const t = now.getTime();
+  const list: any[] = season.seasonPassList ?? [];
+  const entry = list.find((e) =>
+    Date.parse(e.seasonPassStartDate) <= t && t < Date.parse(e.seasonPassEndDate)) ?? list.at(-1);
+
+  const pass = entry?.seasonPassHash
+    ? getDef('DestinySeasonPassDefinition', entry.seasonPassHash)
+    : undefined;
+  const reward = pass ? progressions?.[pass.rewardProgressionHash] : undefined;
+  if (!reward) return undefined;
+
+  const prestige = progressions?.[pass.prestigeProgressionHash];
+  return {
+    season: season.displayProperties?.name ?? `#${currentSeasonHash}`,
+    tier: reward.level ?? 0,
+    progress: progressString(reward),
+    prestigeTier: prestige?.level ? prestige.level : null,
+  };
+}
