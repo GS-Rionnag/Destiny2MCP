@@ -26,7 +26,7 @@ describe('itemSummary', () => {
   it('resolves names, power, and drops noise', () => {
     const s = itemSummary(
       { itemHash: 999, itemInstanceId: '123', quantity: 1 },
-      { '123': { primaryStat: { value: 2010 } } },
+      { '123': { primaryStat: { statHash: 1480404414, value: 2010 } } }, // Attack — a real power stat
     );
     expect(s).toEqual({
       name: 'Test Rifle', itemHash: 999, itemInstanceId: '123',

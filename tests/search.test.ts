@@ -76,10 +76,11 @@ const PROFILE = {
   itemComponents: {
     instances: {
       data: {
-        w1: { primaryStat: { value: 1900 }, damageType: 3 },
-        w2: { primaryStat: { value: 1750 }, damageType: 3 },
-        a1: { primaryStat: { value: 1800 }, energy: { energyUsed: 3, energyCapacity: 10 } },
-        a2: { primaryStat: { value: 1810 }, energy: { energyUsed: 0, energyCapacity: 10 } },
+        // statHash matters: only Attack/Defense/Power count as power. See itemPower().
+        w1: { primaryStat: { statHash: 1480404414, value: 1900 }, damageType: 3 },
+        w2: { primaryStat: { statHash: 1480404414, value: 1750 }, damageType: 3 },
+        a1: { primaryStat: { statHash: 3897883278, value: 1800 }, energy: { energyUsed: 3, energyCapacity: 10 } },
+        a2: { primaryStat: { statHash: 3897883278, value: 1810 }, energy: { energyUsed: 0, energyCapacity: 10 } },
       },
     },
     stats: {
@@ -134,6 +135,30 @@ describe('buildItems', () => {
 
   it('lowercases plug names for perk matching', () => {
     expect(items().find((i) => i.itemInstanceId === 'w1')!.plugs).toEqual(['incandescent']);
+  });
+
+  it('reports power only for Attack/Defense/Power, the way DIM does', () => {
+    // Bungie hangs a primaryStat off things with no power: a sparrow's is Speed, a ghost's is
+    // Power Bonus, and a subclass gets a random armor stat that can read negative.
+    const profile = structuredClone(PROFILE) as any;
+    profile.profileInventory.data.items.push(
+      { itemHash: 100, itemInstanceId: 'sparrow', quantity: 1, bucketHash: 138197802, state: 0 },
+      { itemHash: 100, itemInstanceId: 'subclass', quantity: 1, bucketHash: 138197802, state: 0 },
+      { itemHash: 100, itemInstanceId: 'ghost', quantity: 1, bucketHash: 138197802, state: 0 },
+    );
+    Object.assign(profile.itemComponents.instances.data, {
+      sparrow: { primaryStat: { statHash: 1501155019, value: 190 } },   // Speed
+      subclass: { primaryStat: { statHash: 392767087, value: -10 } },   // Health, negative
+      ghost: { primaryStat: { statHash: 3289069874, value: 21 } },      // Power Bonus
+    });
+    const built = buildItems(profile);
+    for (const id of ['sparrow', 'subclass', 'ghost']) {
+      expect(built.find((i) => i.itemInstanceId === id)!.power).toBeUndefined();
+    }
+    expect(built.find((i) => i.itemInstanceId === 'w1')!.power).toBe(1900);
+    // ...so they cannot leak into is:haspower or a power sort either.
+    const powered = built.filter(compileQuery('is:haspower').predicate).map((i) => i.itemInstanceId);
+    expect(powered).toEqual(['w1', 'w2', 'a1', 'a2']);
   });
 });
 

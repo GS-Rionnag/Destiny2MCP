@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
 import { defName, getDef, searchDefs } from '../manifest.js';
-import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, SEARCH_HELP, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
+import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, SEARCH_HELP, buildItems, compileQuery, itemPower, sortItems, statValue, type SearchItem } from '../search/index.js';
 import { getNote, matchItem, rebuildWishlist, wishlistMeta, wishlistReady } from '../wishlist.js';
 import { maxId, newerThan, readMarks, saveMark } from '../watermark.js';
 import { tool } from './util.js';
@@ -16,7 +16,7 @@ export function itemSummary(item: any, instances?: Record<string, any>) {
     itemInstanceId: item.itemInstanceId,
     type: def?.itemTypeDisplayName,
     tier: def?.inventory?.tierTypeName,
-    power: inst?.primaryStat?.value,
+    power: itemPower(inst),
     quantity: item.quantity > 1 ? item.quantity : undefined,
   };
 }
@@ -380,7 +380,7 @@ For "what did I just get" in a normal conversation use search_inventory with sor
       return {
         itemInstanceId: item_instance_id,
         name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
-        power: inst?.primaryStat?.value,
+        power: itemPower(inst),
         godroll: match ? {
           match: match.match, perks: match.perks, tags: match.tags, source: match.source,
           swap: match.swap, rollsMatched: match.rollsMatched,

@@ -51,6 +51,16 @@ const OLD_STAT_NAMES: Record<string, number> = {
   discipline: 1735777505, intellect: 144602215, strength: 4244567218,
 };
 
+// Attack, Defense, Power — DIM's `lightStats` (app/search/search-filter-values.ts). Bungie puts a
+// primaryStat on plenty of things that have no power: a sparrow's is Speed, a ghost's is Power
+// Bonus, and a subclass gets a random armor stat that can read NEGATIVE. Reporting any of those as
+// "power" is wrong, so like DIM we only call it power when it is one of these three.
+const LIGHT_STATS = new Set([1480404414, 3897883278, 1935470627]);
+
+/** An item's power level, or undefined for items that do not have one. */
+export const itemPower = (inst: any): number | undefined =>
+  inst?.primaryStat && LIGHT_STATS.has(inst.primaryStat.statHash) ? inst.primaryStat.value : undefined;
+
 const DAMAGE_TYPES: Record<string, number> = { kinetic: 1, arc: 2, solar: 3, void: 4, stasis: 6, strand: 7 };
 const AMMO_TYPES: Record<string, number> = { primary: 1, special: 2, heavy: 3 };
 const CLASS_TYPES: Record<string, number> = { titan: 0, hunter: 1, warlock: 2 };
@@ -175,7 +185,7 @@ export function buildItems(r: any): SearchItem[] {
       itemInstanceId: item.itemInstanceId,
       type: d?.itemTypeDisplayName,
       tier: (d?.inventory?.tierTypeName ?? '').toLowerCase(),
-      power: inst?.primaryStat?.value,
+      power: itemPower(inst),
       quantity: item.quantity ?? 1,
       location,
       characterId,
