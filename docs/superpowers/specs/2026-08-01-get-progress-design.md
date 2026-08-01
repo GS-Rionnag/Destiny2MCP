@@ -139,9 +139,12 @@ Rules:
 - **Completed rows hidden by default**, but counted in `hidden` — so the model knows they exist
   and does not re-fetch looking for them. `include_complete:true` inlines them instead.
 - **Empty sections omitted entirely**, not emitted as `[]`.
-- `all_characters:true` returns an array of the whole object, one entry per character. Ranks,
-  season pass and artifact are account-scoped in practice but stay per-entry rather than being
-  hoisted — hoisting would make the two response shapes structurally different for no gain.
+- `all_characters:true` returns `{ "characters": [ ... ] }`, one entry per character, each entry
+  the same shape as the single-character response. Ranks, season pass and artifact are
+  account-scoped in practice but stay per-entry rather than being hoisted — hoisting would make
+  the two response shapes structurally different for no gain.
+- `notes` (see error handling) is a sibling of `character`/`characters` in both shapes, present
+  only when non-empty.
 
 ## Milestone completion
 
