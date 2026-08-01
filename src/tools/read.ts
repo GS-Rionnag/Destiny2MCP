@@ -161,7 +161,7 @@ Answer in ONE call instead of paging:
   queries — several searches against one inventory snapshot, e.g. [{"id":"vault","query":"is:invault","count_only":true},{"id":"chars","query":"-is:invault","count_only":true}]`,
     inputSchema: z.object({
       query: z.string().optional().describe('DIM search query. Omit to list everything.'),
-      sort: z.string().optional().describe('"power", "name", "quantity" or "stat:<name>" — numeric sorts are highest first, applied before limit'),
+      sort: z.string().optional().describe('"power", "name", "recent", "quantity" or "stat:<name>" — numeric sorts are highest first, applied before limit. "recent" is newest-acquired first (DIM item-feed order), the answer to "what did I just get".'),
       // Clamped, not rejected: a model guessing limit:500 should get 200 items, not a wasted turn
       limit: z.number().int().min(1).transform((n) => Math.min(n, 200)).default(50),
       count_only: z.boolean().default(false).describe('Return only the match count'),

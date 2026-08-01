@@ -230,6 +230,18 @@ describe('sortItems', () => {
     expect(sortItems(items(), 'power').slice(0, 1).map((i) => i.itemInstanceId)).toEqual(['w1']);
   });
 
+  it('sorts by acquisition recency, newest instance id first', () => {
+    // Differing digit lengths: a plain string compare would rank "9..." above the longer, newer id.
+    const feed = [
+      { itemInstanceId: '9999999999999' },
+      { itemInstanceId: '10000000000000' },
+      { itemInstanceId: '10000000000001' },
+      { itemInstanceId: undefined },
+    ] as SearchItem[];
+    expect(sortItems(feed, 'recent').map((i) => i.itemInstanceId))
+      .toEqual(['10000000000001', '10000000000000', '9999999999999', undefined]);
+  });
+
   it('rejects unknown sorts', () => {
     expect(() => sortItems([], 'bogus')).toThrowError(/Unknown sort/);
     expect(() => sortItems([], 'stat:bogus')).toThrowError(/Unknown stat/);

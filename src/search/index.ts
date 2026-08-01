@@ -398,18 +398,25 @@ export function compileQuery(query: string): CompiledQuery {
   return { predicate: walk(ast), statsUsed, usedPerks };
 }
 
-/** Sort key for the tool's `sort` param: "power", "name", "quantity" or "stat:<name>". */
+/** Sort key for the tool's `sort` param: "power", "name", "recent", "quantity" or "stat:<name>". */
 export function sortItems(items: SearchItem[], sort: string): SearchItem[] {
   const key = sort.trim().toLowerCase();
   if (key === 'name') return [...items].sort((a, b) => a.name.localeCompare(b.name));
+  // DIM's item-feed order: Bungie allocates instance ids monotonically, so newest id = newest drop.
+  // Padded string compare, not BigInt — ids are uint64 and a malformed one must not throw mid-sort.
+  // Uninstanced stacks (materials, shaders) have no id and fall to the end.
+  if (key === 'recent') {
+    const k = (i: SearchItem) => (i.itemInstanceId ?? '').padStart(20, '0');
+    return [...items].sort((a, b) => k(b).localeCompare(k(a)));
+  }
   const stat = key.startsWith('stat:') ? norm(key.slice(5)) : undefined;
   if (stat !== undefined && stat !== 'total' && !stats().has(stat)) {
-    throw new Error(`Unknown stat "${stat}" in sort. Use "power", "name", "quantity", or "stat:<name>".`);
+    throw new Error(`Unknown stat "${stat}" in sort. Use "power", "name", "recent", "quantity", or "stat:<name>".`);
   }
   const value = (i: SearchItem): number =>
     (stat !== undefined ? statValue(i, stat) : key === 'quantity' ? i.quantity : key === 'power' ? i.power : undefined) ?? -Infinity;
   if (stat === undefined && key !== 'power' && key !== 'quantity') {
-    throw new Error(`Unknown sort "${sort}". Use "power", "name", "quantity", or "stat:<name>".`);
+    throw new Error(`Unknown sort "${sort}". Use "power", "name", "recent", "quantity", or "stat:<name>".`);
   }
   return [...items].sort((a, b) => value(b) - value(a)); // numeric sorts are descending — "highest X" is the ask
 }
