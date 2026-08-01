@@ -74,7 +74,9 @@ A `//notes:` line resets the pending note; the pending note applies to every sub
 `dimwishlist:` line until the next `//notes:` or `title:`. Inline `#notes:` wins for its own
 line only. `item=-<hash>` (trash) is skipped.
 
-Identical note text is stored once — 252k rolls collapse to 5,024 note rows.
+Identical note text is stored once — 252k roll lines collapse to ~5.1k note rows. Resolving perks
+to names also merges rolls that differed only by perk hash, so the built index holds 198,167 rolls
+in a ~24 MB database.
 
 ## Matching — by perk name, not perk hash
 

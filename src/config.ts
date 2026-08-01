@@ -10,4 +10,8 @@ export const config = {
   // Off by default: one line per call fills data/mcp.log and the journal for a log nobody reads
   // until something breaks. Set MCP_LOG=1 in .env to get it back for a debugging session.
   logCalls: process.env.MCP_LOG === '1',
+  // DIM wish list ("god rolls"). Point WISHLIST_URL at another DIM-format list to swap sources.
+  wishlistUrl: process.env.WISHLIST_URL
+    ?? 'https://raw.githubusercontent.com/48klocs/dim-wish-list-sources/refs/heads/master/voltron.txt',
+  wishlistMaxAgeMs: Number(process.env.WISHLIST_MAX_AGE_HOURS ?? 24) * 3600 * 1000,
 };

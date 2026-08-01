@@ -1,4 +1,5 @@
 import { defName, eachDef, getDef } from '../manifest.js';
+import { matchItem, wishlistReady, type GodrollMatch } from '../wishlist.js';
 import { parseQuery, type QueryAST } from './query-parser.js';
 
 /** One inventory item, with everything a filter needs already resolved. */
@@ -31,6 +32,10 @@ export interface SearchItem {
   stats: Record<string, number>;
   /** Lowercased socket plug names, from component 305. */
   plugs: string[];
+  /** Socket index -> lowercased selectable plug names, from component 310. God-roll queries only. */
+  plugOptions?: Record<number, string[]>;
+  /** Set by a god-roll filter so the tool can echo the match back. */
+  godroll?: GodrollMatch | null;
   /** How many copies of this item hash the account holds. */
   dupeCount: number;
 }
@@ -55,6 +60,9 @@ const RARITY_ALIASES: Record<string, string> = {
 
 /** Profile components search needs. Everything is filtered locally, DIM-style. */
 export const SEARCH_COMPONENTS = '102,201,205,200,300,304,305';
+// 310 (ItemReusablePlugs) is what makes "you own this god roll but have not selected it" answerable.
+// It costs ~1MB and ~1s on a full account, so only god-roll queries pay for it.
+export const SEARCH_COMPONENTS_GODROLL = SEARCH_COMPONENTS + ',310';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, '');
 
@@ -127,6 +135,7 @@ export function buildItems(r: any): SearchItem[] {
   const instances = r.itemComponents?.instances?.data ?? {};
   const itemStats = r.itemComponents?.stats?.data ?? {};
   const sockets = r.itemComponents?.sockets?.data ?? {};
+  const reusable = r.itemComponents?.reusablePlugs?.data ?? {};
   const statName = statNames();
 
   const defs = new Map<number, any>(); // hashes repeat heavily; each getDef is a SQLite hit + JSON.parse
@@ -189,6 +198,10 @@ export function buildItems(r: any): SearchItem[] {
       plugs: (sockets[item.itemInstanceId]?.sockets ?? [])
         .filter((sk: any) => sk.plugHash && sk.isEnabled !== false)
         .map((sk: any) => plugName(sk.plugHash)),
+      plugOptions: reusable[item.itemInstanceId]
+        ? Object.fromEntries(Object.entries<any[]>(reusable[item.itemInstanceId].plugs ?? {})
+          .map(([idx, opts]) => [Number(idx), opts.filter((o) => o.canInsert).map((o) => plugName(o.plugItemHash))]))
+        : undefined,
       dupeCount: 0,
     } satisfies SearchItem;
   });
@@ -285,6 +298,8 @@ export interface CompiledQuery {
   statsUsed: string[];
   /** True if the query filtered on perks, so the tool includes matching plug names. */
   usedPerks: boolean;
+  /** True if the query used a god-roll filter — the tool must then fetch component 310. */
+  usedGodroll: boolean;
 }
 
 function keywordList(): string {
@@ -292,6 +307,7 @@ function keywordList(): string {
   return [
     `is: ${isKeywords}`,
     'is: also accepts any item type from the manifest — is:handcannon, is:sniperrifle, is:helmet, is:gauntlets, is:weapon, is:armor, is:lfr, is:lmg, is:smg',
+    'god rolls (DIM wish list): is:godroll / is:wishlist (matches a wish-list roll, equipped or one perk swap away), is:godrollequipped (the plugged roll matches), godroll:<text> / wishlistnotes:<text> (tag, source or note text, e.g. godroll:pve-boss)',
     'text: name:, exactname:, description:, type:, perk:, perkname:, or a bare word',
     'numbers (<, <=, =, >, >= or a bare number): power:, light:, stack:, count:, energycapacity:',
     'stats: stat:<name>:<comparison>, e.g. stat:resilience:>=20 or stat:total:>=65',
@@ -304,11 +320,34 @@ export function compileQuery(query: string): CompiledQuery {
   const ast = parseQuery(query);
   const statsUsed: string[] = [];
   let usedPerks = false;
+  let usedGodroll = false;
+
+  // ponytail: one indexed SQLite lookup per item, no memo across duplicate item hashes.
+  // Measured cheap on a full vault; memoize on itemHash + plug signature if that ever changes.
+  const godroll = (i: SearchItem, text?: string) => {
+    i.godroll = matchItem(i.itemHash, i.plugs, i.plugOptions, text);
+    return i.godroll;
+  };
+  const needIndex = () => {
+    if (!wishlistReady()) {
+      throw new Error('God-roll filters need the DIM wish list index, which is not built yet. It downloads in the background on startup — call refresh_wishlist to build it now.');
+    }
+    usedGodroll = true;
+  };
 
   const filter = (type: string, args: string): Pred => {
     switch (type) {
       case 'is': {
         const k = norm(args);
+        if (k === 'godroll' || k === 'wishlist' || k === 'godrollequipped' || k === 'wishlistequipped') {
+          needIndex();
+          const strict = k.endsWith('equipped');
+          // matchItem already prefers an equipped roll, so an "available" best means no equipped match exists.
+          return (i) => {
+            const m = godroll(i);
+            return m !== null && (!strict || m.match === 'equipped');
+          };
+        }
         const explicit = IS_FILTERS[k];
         if (explicit) return explicit;
         const cat = categories().get(k);
@@ -337,6 +376,12 @@ export function compileQuery(query: string): CompiledQuery {
       case 'type': {
         const q = args.toLowerCase();
         return (i) => (i.type ?? '').toLowerCase().includes(q);
+      }
+      case 'godroll':
+      case 'wishlistnotes': {
+        needIndex();
+        const q = args.toLowerCase();
+        return (i) => godroll(i, q) !== null;
       }
       case 'perk':
       case 'perkname': {
@@ -395,7 +440,8 @@ export function compileQuery(query: string): CompiledQuery {
     }
   };
 
-  return { predicate: walk(ast), statsUsed, usedPerks };
+  const predicate = walk(ast);
+  return { predicate, statsUsed, usedPerks, usedGodroll };
 }
 
 /** Sort key for the tool's `sort` param: "power", "name", "recent", "quantity" or "stat:<name>". */

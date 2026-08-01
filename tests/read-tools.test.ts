@@ -57,13 +57,19 @@ describe('get_item_details batching', () => {
     expect(out[2].name).toBe('Item1');
   });
 
-  it('only asks Bungie for the reusable-plugs component when plug options are wanted', async () => {
+  it('always asks Bungie for the reusable-plugs component, which god-roll matching needs', async () => {
     vi.mocked(bungieFetch).mockImplementation(async () => detail(1) as any);
     const tools = capture();
     await tools.get_item_details({ item_instance_ids: ['A'], include_plug_options: false });
-    expect((vi.mocked(bungieFetch).mock.calls[0][1] as any).query.components).not.toContain('310');
+    expect((vi.mocked(bungieFetch).mock.calls[0][1] as any).query.components).toContain('310');
     await tools.get_item_details({ item_instance_ids: ['A'], include_plug_options: true });
     expect((vi.mocked(bungieFetch).mock.calls[1][1] as any).query.components).toContain('310');
+  });
+
+  it('still lists plug options only when they are asked for', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async () => detail(1) as any);
+    const [quiet] = parse(await capture().get_item_details({ item_instance_ids: ['A'], include_plug_options: false }));
+    expect(quiet.sockets.every((s: any) => s.options === undefined)).toBe(true);
   });
 
   it('drops nameless hidden intrinsics from plug options and from the current plug', async () => {

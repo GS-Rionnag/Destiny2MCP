@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
 import { defName, getDef, searchDefs } from '../manifest.js';
-import { SEARCH_COMPONENTS, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
+import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
+import { getNote, matchItem, rebuildWishlist, wishlistMeta, wishlistReady } from '../wishlist.js';
 import { maxId, newerThan, readMarks, saveMark } from '../watermark.js';
 import { tool } from './util.js';
 
@@ -156,6 +157,15 @@ Examples:
   (is:handcannon or is:smg) is:legendary power:>=1800
   is:dupe is:legendary -is:locked
 
+God rolls, from the community DIM wish list: is:godroll matches a roll the wish list recommends —
+either plugged now or one perk swap away — and each matching item comes back with a godroll field
+carrying the perks, tags ("PvE-Boss", "PvP-God"), the reviewer it came from, and any swap needed.
+is:godrollequipped is the strict form. godroll:<text> filters on the tags or the write-up, e.g.
+godroll:pve-boss. Use this before recommending a weapon; call get_item_details on the few that
+matter to read WHY each roll is good.
+  is:weapon is:godroll godroll:pve-endgame
+  is:handcannon is:godrollequipped is:invault
+
 Answer in ONE call instead of paging:
   count_only — just the number, no items
   group_by — counts per itemHash/name/type/tier/location over EVERY match, not just the page. Use itemHash for dupe audits; several distinct items share a name.
@@ -178,9 +188,10 @@ Answer in ONE call instead of paging:
   }, tool(async ({ query, sort, limit, count_only, group_by, group_limit, queries }) => {
     // Compile first: a bad query should cost no API call, and should come back as the keyword list.
     const plan = (q?: string) => {
-      const { predicate, statsUsed, usedPerks } = compileQuery(q ?? '');
+      const { predicate, statsUsed, usedPerks, usedGodroll } = compileQuery(q ?? '');
       return {
         predicate,
+        usedGodroll,
         showStats: statsUsed,
         perkTerms: usedPerks && q ? [...q.matchAll(/perk(?:name)?:("[^"]*"|'[^']*'|\S+)/gi)]
           .map((m) => m[1].replace(/^['"]|['"]$/g, '').toLowerCase()) : [],
@@ -192,8 +203,10 @@ Answer in ONE call instead of paging:
       ? sort.slice(5).toLowerCase().replace(/[^a-z0-9.]/g, '') : undefined;
     if (!queries && sort) sortItems([], sort); // validate before spending an API call on a query we can't answer
 
+    // Component 310 doubles the payload, so only a god-roll query pays for it.
+    const wantsGodroll = single?.usedGodroll || compiled.some((c) => c.usedGodroll);
     const r = await bungieFetch<any>(`${await profilePath()}/`, {
-      auth: true, query: { components: SEARCH_COMPONENTS },
+      auth: true, query: { components: wantsGodroll ? SEARCH_COMPONENTS_GODROLL : SEARCH_COMPONENTS },
     });
     const all = buildItems(r);
 
@@ -224,6 +237,8 @@ Answer in ONE call instead of paging:
         characterId: i.characterId,
         stats: showStats.length ? Object.fromEntries(showStats.map((s) => [s, statValue(i, s)])) : undefined,
         perks: p.perkTerms.length ? i.plugs.filter((pl) => p.perkTerms.some((t) => pl.includes(t))) : undefined,
+        // Tags and source only — get_item_details carries the note explaining why the roll is good.
+        godroll: i.godroll ? { ...i.godroll, noteId: undefined } : undefined,
       }));
     };
 
@@ -309,8 +324,10 @@ For "what did I just get" in a normal conversation use search_inventory with sor
   }, tool(async ({ item_instance_ids, include_plug_options, socket_index, option_limit, option_offset }) => {
     // One bad id must not lose the other 14 — report it in place and keep going.
     const one = async (item_instance_id: string) => {
+      // 310 is always requested: god-roll matching needs the perks this item can still select,
+      // even when the caller did not ask for the plug options to be listed back.
       const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
-        auth: true, query: { components: include_plug_options ? '300,302,304,305,307,310' : '300,302,304,305,307' },
+        auth: true, query: { components: '300,302,304,305,307,310' },
       });
       const inst = r.instance?.data;
       const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
@@ -348,10 +365,23 @@ For "what did I just get" in a normal conversation use search_inventory with sor
           nextOffset: seen < uniq.length ? seen : null,
         };
       };
+      const lower = (hash: number) => defName('DestinyInventoryItemDefinition', hash).toLowerCase();
+      const match = matchItem(
+        r.item?.data?.itemHash ?? 0,
+        (r.sockets?.data?.sockets ?? []).filter((s: any) => s.plugHash && s.isEnabled !== false).map((s: any) => lower(s.plugHash)),
+        Object.fromEntries(Object.entries(reusable)
+          .map(([i, list]) => [Number(i), list.filter((p: any) => p.canInsert).map((p: any) => lower(p.plugItemHash))])),
+      );
+
       return {
         itemInstanceId: item_instance_id,
         name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
         power: inst?.primaryStat?.value,
+        godroll: match ? {
+          match: match.match, perks: match.perks, tags: match.tags, source: match.source,
+          swap: match.swap, rollsMatched: match.rollsMatched,
+          why: getNote(match.noteId)?.text || undefined,
+        } : undefined,
         energy: inst?.energy ? { used: inst.energy.energyUsed, capacity: inst.energy.energyCapacity } : undefined,
         stats: Object.fromEntries(Object.entries<any>(r.stats?.data?.stats ?? {})
           .map(([h, s]) => [defName('DestinyStatDefinition', Number(h)), s.value])),
@@ -369,6 +399,15 @@ For "what did I just get" in a normal conversation use search_inventory with sor
     for (const id of item_instance_ids) {
       try { out.push(await one(id)); }
       catch (e: any) { out.push({ itemInstanceId: id, error: e?.message ?? String(e) }); }
+    }
+    // A wish-list note runs to 1500 words. Five of them is enough to choose between weapons;
+    // fifteen would spend the caller's whole context on prose.
+    let full = 0;
+    for (const o of out as any[]) {
+      if (o.godroll?.why && ++full > 5) {
+        o.godroll.why = o.godroll.why.slice(0, 400);
+        o.godroll.whyTruncated = 'Call get_item_details with fewer ids for the full write-up.';
+      }
     }
     return out;
   }));
@@ -547,4 +586,13 @@ For "what did I just get" in a normal conversation use search_inventory with sor
     if (!d) return { hash: h, error: `not found in ${table}` };
     return full ? d : trimDef(d);
   })));
+
+  server.registerTool('refresh_wishlist', {
+    description: 'Re-download and rebuild the DIM wish list index behind the is:godroll filters. It refreshes itself in the background once a day, so only call this when a god-roll filter says the index is missing, or when the user wants the very latest community rolls. Takes a few seconds.',
+    inputSchema: z.object({}),
+  }, tool(async () => {
+    const before = wishlistMeta();
+    const r = await rebuildWishlist();
+    return { ...r, previousFetchedAt: before.fetchedAt };
+  }));
 }

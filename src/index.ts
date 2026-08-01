@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { config } from './config.js';
 import { openManifest } from './manifest.js';
+import { refreshWishlistIfStale } from './wishlist.js';
 import { startAuthServer } from './auth-server.js';
 import { readTokens } from './auth.js';
 import { registerReadTools } from './tools/read.js';
@@ -39,6 +40,12 @@ or/-/parens). Put every condition in one query — "is:armor is:hunter -is:exoti
 stat:resilience:>=20" answers in one call what seven name/type searches cannot. Add
 sort to get the highest few instead of a list to scan.
 
+Judging whether a weapon is good is not yours to guess — the community DIM wish list is
+indexed locally. search_inventory "is:godroll" finds every wish-listed roll in the account
+(plugged now, or one perk swap away) and tags each one (PvE-Boss, PvP-God, ...). Then
+get_item_details returns the reviewer's full write-up on WHY that roll works. Build loadouts
+from that, not from memory of an older sandbox.
+
 For a recurring or scheduled check ("tell me what dropped"), use get_new_items, never
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
 reports each drop exactly once even though the run that calls it remembers nothing.
@@ -67,7 +74,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.8.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.9.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
@@ -84,6 +91,7 @@ async function main() {
   }
 
   await openManifest();
+  refreshWishlistIfStale(); // background: resolving wish-list perk hashes needs the manifest open
 
   const app = express();
   app.use(express.json({ limit: '1mb' }));

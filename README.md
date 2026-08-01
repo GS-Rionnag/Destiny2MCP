@@ -107,18 +107,18 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (28)
+## Tools (29)
 
-### Read (16)
+### Read (17)
 
 | Tool | Description |
 |------|-------------|
 | `get_profile` | Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer. |
 | `get_session_state` | Whether the player is online and which writes are allowed right now — equip/socket need orbit, a social space, or offline. One call instead of deducing it from the profile. |
 | `get_character` | One character in detail: stats (Mobility etc.) and all currently equipped items with power. |
-| `search_inventory` | Search ALL items across every character and the vault using [DIM search syntax](#dim-search-syntax) — `is:armor is:hunter -is:exotic stat:resilience:>=20`. Optional `sort` (`power`, `name`, `recent`, `quantity`, `stat:<name>`) is applied before `limit`. Returns instance ids needed by transfer/equip tools. |
+| `search_inventory` | Search ALL items across every character and the vault using [DIM search syntax](#dim-search-syntax) — `is:armor is:hunter -is:exotic stat:resilience:>=20`. Optional `sort` (`power`, `name`, `recent`, `quantity`, `stat:<name>`) is applied before `limit`. Returns instance ids needed by transfer/equip tools. `is:godroll` filters against the [DIM wish list](#god-rolls); matching rows carry a compact `godroll` field. |
 | `get_new_items` | Items acquired since the last check — for scheduled/recurring monitoring. Keeps a watermark per `cursor` in `data/watermarks.json`, so each drop is reported exactly once even to a client with no memory between runs. Optional DIM `query` filters what gets reported; `peek` reports without advancing. See [Scheduled monitoring](#scheduled-monitoring). |
-| `get_item_details` | Full detail for up to 15 item instances in one call: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. A bad id is reported in place, not fatal. |
+| `get_item_details` | Full detail for up to 15 item instances in one call: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. A bad id is reported in place, not fatal. Items matching a [god roll](#god-rolls) include the full wish-list note explaining why the roll is good. |
 | `get_vendors` | List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock. |
 | `get_vendor_items` | One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386). |
 | `get_loadouts` | In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout. |
@@ -129,6 +129,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `search_player` | Find any player by full Bungie name ("Guardian#1234") → their membership ids. |
 | `search_manifest` | Look up any Destiny definition by name → hash. Items by default; set table for perks (DestinySandboxPerkDefinition), activities (DestinyActivityDefinition), etc. |
 | `get_definition` | Definitions by hash from the local manifest — instant, no network, up to 50 hashes per call. Trimmed to name/description/type/energy cost/perks; `full` returns the raw definition. |
+| `refresh_wishlist` | Re-download and rebuild the DIM wish list index used by the god-roll filters. Returns roll/note/weapon counts. |
 
 ### Write (9)
 
@@ -175,13 +176,42 @@ exactly one API call. Repeat searches inside 60s hit the response cache and cost
 | **Location** | `is:invault` `is:oncharacter` `is:equipped` `is:postmaster` `is:transferable` |
 | **Numbers** | `power:` `light:` `stack:` `count:` `energycapacity:`, each taking `>`, `>=`, `<`, `<=`, `=` or a bare number |
 | **Stats** | `stat:<name>:<comparison>`, e.g. `stat:resilience:>=20`, plus `stat:total:` for the armor total |
+| **God rolls** | `is:godroll` / `is:wishlist` (matches a wish-list roll, equipped or one perk swap away), `is:godrollequipped` (strict — the currently plugged roll matches), `godroll:<text>` / `wishlistnotes:<text>` (tag, source title or note text contains the text, e.g. `godroll:pve-boss`) |
 
 Armor 3.0 renamed the six armor stats (Resilience → Health, Mobility → Weapons, and so on). Both
 names work — the old ones are aliases, as they are in DIM.
 
 Not supported, because they need DIM Sync or data Bungie's API doesn't serve: `tag:`, `notes:`,
-`season:`, `source:`, `foundry:`, `basestat:`, wishlists. An unknown keyword comes back as an error
+`season:`, `source:`, `foundry:`, `basestat:`. An unknown keyword comes back as an error
 listing everything that is supported.
+
+## God rolls
+
+The god-roll filters match your weapons against a DIM wish list. The default source is
+[voltron.txt](https://raw.githubusercontent.com/48klocs/dim-wish-list-sources/refs/heads/master/voltron.txt)
+— a continuously updated compilation of community god rolls (26 MB, 252,163 `dimwishlist:` lines
+covering 1,225 weapons). Set `WISHLIST_URL` in `.env` to use a different list. The file is parsed
+once into `data/wishlist.db` (SQLite, ~24 MB — 198k rolls and 5.1k note blocks after
+deduplication) and never held in memory.
+
+The point is the notes: every roll block carries a prose explanation of **why** the roll is good
+— what the model needs to build a loadout, not just which perks to look for. `search_inventory`
+returns tags + source per matching item (~10 tokens a row); `get_item_details` returns the full
+note, capped at 5 full notes per call with the rest truncated to 400 chars, so a 15-id call
+cannot blow the context.
+
+- **Matching is by perk name, not hash**, so crafted and enhanced weapons match (300 of 301
+  enhanced perks share their base perk's display name).
+- Two match grades: `equipped` (the plugged roll matches) and `available` (every perk is
+  selectable but a swap is needed — the match reports which socket to change). This matters: on
+  a real account 138 of 230 weapons had multi-option perk columns.
+- The extra Bungie component this needs (310, ItemReusablePlugs) is requested only when a query
+  uses a god-roll filter — measured 1.45 MB / 770 ms without it vs 2.39 MB / 1754 ms with it, so
+  ordinary searches keep their speed.
+- On boot the index rebuilds in the background if missing or older than 24 h; the old index
+  keeps serving and startup never blocks. `refresh_wishlist` forces a rebuild.
+- Not supported: the trash list (the source ships zero entries), armor, multiple simultaneous
+  sources.
 
 ## Known Bungie limits
 
