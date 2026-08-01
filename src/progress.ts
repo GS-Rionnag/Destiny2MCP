@@ -149,3 +149,54 @@ export function buildMilestones(
   rows.sort((a, b) => a.name.localeCompare(b.name));
   return { rows, hiddenComplete };
 }
+
+export type Bounty = { name: string; kind: string; pct: number; objectives: string[]; expires?: string };
+
+// DestinyItemType: 26 Bounty, 12 QuestStep. Everything else in the inventory is not a to-do.
+const BOUNTY_KINDS: Record<number, string> = { 26: 'Bounty', 12: 'QuestStep' };
+
+export function buildBounties(
+  items: any[],
+  instanced: Record<string, { objectives?: any[] }>,
+  uninstanced: Record<string, { objectives?: any[] }>,
+  vars: Record<string, number>,
+  { includeComplete = false, limit = 25 }: { includeComplete?: boolean; limit?: number } = {},
+): { rows: Bounty[]; hiddenComplete: number } {
+  const rows: Bounty[] = [];
+  let hiddenComplete = 0;
+
+  for (const it of items ?? []) {
+    const def = getDef('DestinyInventoryItemDefinition', it.itemHash);
+    const kind = BOUNTY_KINDS[def?.itemType];
+    if (!kind) continue;
+
+    // Instanced bounties carry objectives under their instance id; uninstanced ones are keyed
+    // by item hash on the character progression component. Both are real, so read both.
+    const objs: any[] = (it.itemInstanceId
+      ? instanced?.[it.itemInstanceId]?.objectives
+      : uninstanced?.[it.itemHash]?.objectives) ?? [];
+    const visible = objs.filter((o) => o.visible !== false);
+
+    const complete = visible.length > 0 && visible.every((o) => o.complete === true);
+    if (complete && !includeComplete) { hiddenComplete++; continue; }
+
+    // Mean fraction across objectives. `|| 1` guards a zero completionValue; an item with no
+    // visible objectives gets 0 and sorts last rather than producing NaN.
+    const pct = visible.length
+      ? Math.round(100 * visible.reduce(
+          (s, o) => s + Math.min(1, (o.progress ?? 0) / (o.completionValue || 1)), 0) / visible.length)
+      : 0;
+
+    rows.push({
+      name: def?.displayProperties?.name ?? `#${it.itemHash}`,
+      kind,
+      pct,
+      objectives: visible.map((o) => objectiveLine(o, vars)).filter((s): s is string => !!s),
+      expires: it.expirationDate,
+    });
+  }
+
+  // Nearest-to-complete first — an unsorted list is just the inventory again.
+  rows.sort((a, b) => b.pct - a.pct || a.name.localeCompare(b.name));
+  return { rows: rows.slice(0, limit), hiddenComplete };
+}

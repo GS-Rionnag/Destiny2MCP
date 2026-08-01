@@ -5,7 +5,7 @@ vi.mock('../src/manifest.js', () => ({
   defName: vi.fn((_t: string, hash: number) => `Item${hash}`),
 }));
 
-const { buildRanks, resolveSeasonPass, objectiveLine, substituteVars, buildArtifact, buildMilestones } = await import('../src/progress.js');
+const { buildRanks, resolveSeasonPass, objectiveLine, substituteVars, buildArtifact, buildMilestones, buildBounties } = await import('../src/progress.js');
 const { getDef, defName } = await import('../src/manifest.js');
 
 beforeEach(() => {
@@ -163,5 +163,69 @@ describe('buildMilestones', () => {
   it('skips nameless milestones', () => {
     vi.mocked(getDef).mockReturnValue({ displayProperties: {} });
     expect(buildMilestones({ '1': { milestoneHash: 1 } }).rows).toEqual([]);
+  });
+});
+
+describe('buildBounties', () => {
+  const bountyDef = (name: string) => ({ displayProperties: { name }, itemType: 26 });
+
+  beforeEach(() => {
+    vi.mocked(getDef).mockImplementation((table: string) =>
+      table === 'DestinyObjectiveDefinition' ? { progressDescription: 'Do the thing' } : undefined);
+  });
+
+  it('sorts nearest-to-complete first', () => {
+    vi.mocked(getDef).mockImplementation((table: string, hash: number) => {
+      if (table === 'DestinyObjectiveDefinition') return { progressDescription: 'Do the thing' };
+      return bountyDef(hash === 1 ? 'Slow' : 'Fast');
+    });
+
+    const { rows } = buildBounties(
+      [{ itemHash: 1, itemInstanceId: 'A' }, { itemHash: 2, itemInstanceId: 'B' }],
+      {
+        A: { objectives: [{ objectiveHash: 9, progress: 1, completionValue: 10 }] },
+        B: { objectives: [{ objectiveHash: 9, progress: 9, completionValue: 10 }] },
+      },
+      {}, {},
+    );
+
+    expect(rows.map((r) => [r.name, r.pct])).toEqual([['Fast', 90], ['Slow', 10]]);
+    expect(rows[0].objectives).toEqual(['9/10 Do the thing']);
+  });
+
+  it('reads uninstanced bounty progress by itemHash', () => {
+    vi.mocked(getDef).mockImplementation((table: string) =>
+      table === 'DestinyObjectiveDefinition' ? { progressDescription: 'Do the thing' } : bountyDef('Uninstanced'));
+
+    const { rows } = buildBounties(
+      [{ itemHash: 55 }],
+      {},
+      { '55': { objectives: [{ objectiveHash: 9, progress: 5, completionValue: 10 }] } },
+      {},
+    );
+
+    expect(rows[0]).toMatchObject({ name: 'Uninstanced', pct: 50 });
+  });
+
+  it('hides completed bounties by default but counts them', () => {
+    vi.mocked(getDef).mockImplementation((table: string) =>
+      table === 'DestinyObjectiveDefinition' ? { progressDescription: 'Do the thing' } : bountyDef('Done'));
+
+    const run = (opts?: { includeComplete?: boolean }) => buildBounties(
+      [{ itemHash: 1, itemInstanceId: 'A' }],
+      { A: { objectives: [{ objectiveHash: 9, progress: 10, completionValue: 10, complete: true }] } },
+      {}, {}, opts,
+    );
+
+    expect(run()).toMatchObject({ rows: [], hiddenComplete: 1 });
+    expect(run({ includeComplete: true }).rows).toHaveLength(1);
+  });
+
+  it('gives an objectiveless item pct 0 instead of dividing by zero, and ignores non-bounties', () => {
+    vi.mocked(getDef).mockImplementation((_t: string, hash: number) =>
+      hash === 1 ? bountyDef('Empty') : { displayProperties: { name: 'Gun' }, itemType: 3 });
+
+    const { rows } = buildBounties([{ itemHash: 1 }, { itemHash: 2 }], {}, {}, {});
+    expect(rows).toEqual([{ name: 'Empty', kind: 'Bounty', pct: 0, objectives: [], expires: undefined }]);
   });
 });
