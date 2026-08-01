@@ -73,6 +73,8 @@ Requires a ChatGPT plan with developer mode (Plus/Pro/Business) and an OpenAI pl
 
 Keep `tunnel-client run` alive alongside `npm start` (e.g. systemd services) — ChatGPT needs both for every call.
 
+**After changing a tool's schema, delete the connector and add it again.** ChatGPT snapshots the tool list when the connector is created and does not call `tools/list` on later sessions — reconnecting or restarting the server reuses the stale snapshot, and calls fail with `Input validation error`. Confirm the refetch landed by looking for a `tools/list` line in `data/mcp.log`.
+
 Alternative without an OpenAI platform account: expose the server publicly with `cloudflared tunnel --url http://localhost:7777` and add the URL as a connector — but then anyone with the URL controls your Destiny inventory; protect it or rotate it regularly.
 
 ## Connect Claude
@@ -85,7 +87,7 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (23)
+## Tools (24)
 
 ### Read (13)
 
