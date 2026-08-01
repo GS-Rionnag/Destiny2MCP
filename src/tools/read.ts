@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { bungieFetch, getAccount } from '../bungie.js';
 import { defName, getDef, searchDefs } from '../manifest.js';
-import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
+import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, SEARCH_HELP, buildItems, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
 import { getNote, matchItem, rebuildWishlist, wishlistMeta, wishlistReady } from '../wishlist.js';
 import { maxId, newerThan, readMarks, saveMark } from '../watermark.js';
 import { tool } from './util.js';
@@ -150,7 +150,8 @@ export function registerReadTools(server: McpServer): void {
     description: `Search ALL items across every character and the vault with DIM search syntax. Returns the instance ids that transfer/equip/insert_plug need.
 
 One query replaces several searches — combine every condition instead of calling this per slot.
-Filters: is:<keyword> (rarity, element, ammo, class, weapon/armor type, locked/masterwork/crafted/dupe/invault/equipped/postmaster), name:, description:, perk:, type:, power:<comparison>, stat:<name>:<comparison>, count:. Combine with spaces (and), "or", "-" or "not" to negate, and parentheses.
+Every supported keyword is listed at the end of this description; an unknown one is an error, not
+an empty result, so use that list rather than inventing a filter.
 Examples:
   is:armor is:hunter -is:exotic stat:resilience:>=20
   is:weapon is:solar perk:incandescent is:masterwork
@@ -169,7 +170,10 @@ matter to read WHY each roll is good.
 Answer in ONE call instead of paging:
   count_only — just the number, no items
   group_by — counts per itemHash/name/type/tier/location over EVERY match, not just the page. Use itemHash for dupe audits; several distinct items share a name.
-  queries — several searches against one inventory snapshot, e.g. [{"id":"vault","query":"is:invault","count_only":true},{"id":"chars","query":"-is:invault","count_only":true}]`,
+  queries — several searches against one inventory snapshot, e.g. [{"id":"vault","query":"is:invault","count_only":true},{"id":"chars","query":"-is:invault","count_only":true}]
+
+EVERY SUPPORTED KEYWORD:
+${SEARCH_HELP}`,
     inputSchema: z.object({
       query: z.string().optional().describe('DIM search query. Omit to list everything.'),
       sort: z.string().optional().describe('"power", "name", "recent", "quantity" or "stat:<name>" — numeric sorts are highest first, applied before limit. "recent" is newest-acquired first (DIM item-feed order), the answer to "what did I just get".'),

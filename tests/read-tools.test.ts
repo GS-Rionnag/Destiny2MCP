@@ -264,3 +264,16 @@ describe('get_vendors', () => {
       .toEqual(['Xûr', 'Aspects']);
   });
 });
+
+describe('search_inventory keyword discovery', () => {
+  it('carries every supported keyword in its description, so no filter has to be guessed', () => {
+    const cfgs: Record<string, any> = {};
+    registerReadTools({ registerTool: (name: string, cfg: any) => (cfgs[name] = cfg) } as any);
+    const d: string = cfgs.search_inventory.description;
+    // One per group in keywordList() — if a group stops reaching the model, this fails.
+    for (const kw of ['is:godroll', 'is:godrollequipped', 'godroll:<text>', 'exactname:',
+      'energycapacity:', 'stat:<name>:<comparison>', 'is:masterwork', 'quoted phrases']) {
+      expect(d).toContain(kw);
+    }
+  });
+});
