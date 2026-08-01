@@ -13,6 +13,7 @@ import { registerRawTool } from './tools/raw.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
+  if (!config.logCalls) return; // MCP_LOG=1 to re-enable
   const calls = Array.isArray(body) ? body : [body];
   for (const c of calls as any[]) {
     const tool = c?.params?.name ? ` ${c.params.name}` : '';
