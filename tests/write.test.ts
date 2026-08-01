@@ -37,8 +37,11 @@ describe('write tools', () => {
     });
   });
 
-  it('insert_plug resolves plug name to hash', async () => {
-    await capture().insert_plug({ item_instance_id: 'IID', character_id: 'C1', socket_index: 4, plug: 'Sunshot' });
+  it('insert_plug resolves plug names and sockets every plug in one call', async () => {
+    const res = await capture().insert_plug({
+      item_instance_id: 'IID', character_id: 'C1',
+      plugs: [{ socket_index: 4, plug: 'Sunshot' }, { socket_index: 5, plug: '888' }],
+    });
     expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Items/InsertSocketPlugFree/', {
       method: 'POST', auth: true,
       body: {
@@ -46,6 +49,17 @@ describe('write tools', () => {
         itemId: 'IID', characterId: 'C1', membershipType: 3,
       },
     });
+    expect(vi.mocked(bungieFetch).mock.calls.filter(([p]) => p.includes('InsertSocketPlugFree'))).toHaveLength(2);
+    expect(res.isError).toBeUndefined();
+  });
+
+  it('insert_plug reports a failed socket without abandoning the rest', async () => {
+    const res = await capture().insert_plug({
+      item_instance_id: 'IID', character_id: 'C1',
+      plugs: [{ socket_index: 4, plug: 'Nope Nothing' }, { socket_index: 5, plug: 'Sunshot' }],
+    });
+    expect(res.content[0].text).toMatch(/Socket 4 FAILED/);
+    expect(vi.mocked(bungieFetch).mock.calls.filter(([p]) => p.includes('InsertSocketPlugFree'))).toHaveLength(1);
   });
 
   it('resolvePlugHash: numeric passthrough, unknown name throws readable', () => {

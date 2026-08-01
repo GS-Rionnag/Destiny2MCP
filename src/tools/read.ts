@@ -27,6 +27,22 @@ export function formatSales(sales: Record<string, any>) {
   }));
 }
 
+// The fields a model actually reasons over. Raw defs are ~4KB each, mostly icons/UI plumbing.
+export function trimDef(d: any) {
+  return {
+    hash: d.hash,
+    name: d.displayProperties?.name,
+    description: d.displayProperties?.description || undefined,
+    type: d.itemTypeDisplayName || undefined,
+    tier: d.inventory?.tierTypeName || undefined,
+    energyCost: d.plug?.energyCost?.energyCost,
+    plugCategory: d.plug?.plugCategoryIdentifier,
+    perks: (d.perks ?? [])
+      .map((p: any) => getDef('DestinySandboxPerkDefinition', p.perkHash)?.displayProperties?.description)
+      .filter(Boolean),
+  };
+}
+
 export function parseBungieName(full: string): { displayName: string; displayNameCode: number } {
   const i = full.lastIndexOf('#');
   const code = Number(full.slice(i + 1));
@@ -112,13 +128,42 @@ export function registerReadTools(server: McpServer): void {
   }));
 
   server.registerTool('get_item_details', {
-    description: 'Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy.',
-    inputSchema: z.object({ item_instance_id: z.string() }),
-  }, tool(async ({ item_instance_id }) => {
+    description: 'Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. Set include_plug_options to also list what each socket ACCEPTS — do that before insert_plug instead of guessing socket indexes.',
+    inputSchema: z.object({
+      item_instance_id: z.string(),
+      include_plug_options: z.boolean().default(false).describe('List insertable plugs per socket (bigger response)'),
+      socket_index: z.number().int().min(0).optional().describe('Limit plug options to this one socket — much smaller than listing every socket'),
+    }),
+  }, tool(async ({ item_instance_id, include_plug_options, socket_index }) => {
     const r = await bungieFetch<any>(`${await profilePath()}/Item/${item_instance_id}/`, {
-      auth: true, query: { components: '300,302,304,305,307' },
+      auth: true, query: { components: include_plug_options ? '300,302,304,305,307,310' : '300,302,304,305,307' },
     });
     const inst = r.instance?.data;
+    const reusable: Record<string, any[]> = r.reusablePlugs?.data?.plugs ?? {};
+    const socketEntries: any[] = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
+    // ponytail: 12 options/socket keeps shader/ornament sockets (700+ entries) from blowing up the response
+    const options = (i: number) => {
+      if (!include_plug_options || (socket_index !== undefined && i !== socket_index)) return undefined;
+      // The API only fills reusablePlugs for weapon-style sockets; armor mods and subclass
+      // fragments have to come from the manifest plug set the socket points at.
+      let hashes: number[] = (reusable[String(i)] ?? []).filter((p: any) => p.canInsert).map((p: any) => p.plugItemHash);
+      if (!hashes.length) {
+        const e = socketEntries[i] ?? {};
+        const setHash = e.reusablePlugSetHash ?? e.randomizedPlugSetHash;
+        const fromSet = setHash
+          ? (getDef('DestinyPlugSetDefinition', setHash)?.reusablePlugItems ?? [])
+          : (e.reusablePlugItems ?? []);
+        hashes = fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
+      }
+      // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from
+      const byName = new Map<string, number>();
+      for (const h of hashes) {
+        const n = defName('DestinyInventoryItemDefinition', h);
+        if (!byName.has(n)) byName.set(n, h);
+      }
+      const uniq = [...byName].map(([name, hash]) => ({ hash, name }));
+      return { options: uniq.slice(0, 12), moreOptions: uniq.length > 12 ? uniq.length - 12 : undefined };
+    };
     return {
       name: defName('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0),
       power: inst?.primaryStat?.value,
@@ -130,6 +175,7 @@ export function registerReadTools(server: McpServer): void {
         plug: s.plugHash ? defName('DestinyInventoryItemDefinition', s.plugHash) : null,
         plugHash: s.plugHash,
         enabled: s.isEnabled,
+        ...options(i),
       })),
     };
   }));
@@ -280,4 +326,17 @@ export function registerReadTools(server: McpServer): void {
       limit: z.number().int().min(1).max(100).default(25),
     }),
   }, tool(async ({ query, table, limit }) => searchDefs(query, table, limit)));
+
+  server.registerTool('get_definition', {
+    description: 'Look up definitions by hash from the LOCAL manifest — instant, no network. Use this instead of bungie_api_call on /Destiny2/Manifest/... paths, and batch every hash you need into one call.',
+    inputSchema: z.object({
+      hashes: z.array(z.number().int()).min(1).max(50),
+      table: z.string().default('DestinyInventoryItemDefinition'),
+      full: z.boolean().default(false).describe('Raw definition instead of the trimmed one — ~4KB each, use for at most 1-2 hashes'),
+    }),
+  }, tool(async ({ hashes, table, full }) => hashes.map((h) => {
+    const d = getDef(table, h);
+    if (!d) return { hash: h, error: `not found in ${table}` };
+    return full ? d : trimDef(d);
+  })));
 }

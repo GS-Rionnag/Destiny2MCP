@@ -94,7 +94,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `get_profile` | Destiny 2 account overview: characters (class, power, race, playtime), currencies like Glimmer. |
 | `get_character` | One character in detail: stats (Mobility etc.) and all currently equipped items with power. |
 | `search_inventory` | Search ALL items across every character and the vault. Filter by name and/or item type substring (e.g. "Rocket Launcher", "Helmet"). Returns instance ids needed by transfer/equip tools. |
-| `get_item_details` | Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. |
+| `get_item_details` | Full detail for one item instance: perks/mods in each socket (with socket indexes for insert_plug), stats, energy. `include_plug_options` also lists what each socket accepts; `socket_index` narrows that to one socket. |
 | `get_vendors` | List all currently available vendors (Xur, Banshee-44, Ada-1...) with refresh times. Use get_vendor_items for stock. |
 | `get_vendor_items` | One vendor's current stock with costs. vendor_hash from get_vendors (Xur: 2190858386). |
 | `get_loadouts` | In-game loadout slots per character. loadout_index feeds equip_loadout / snapshot_loadout. |
@@ -104,6 +104,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `get_clan` | The account's clan: name, motto, member count, online members. |
 | `search_player` | Find any player by full Bungie name ("Guardian#1234") → their membership ids. |
 | `search_manifest` | Look up any Destiny definition by name → hash. Items by default; set table for perks (DestinySandboxPerkDefinition), activities (DestinyActivityDefinition), etc. |
+| `get_definition` | Definitions by hash from the local manifest — instant, no network, up to 50 hashes per call. Trimmed to name/description/type/energy cost/perks; `full` returns the raw definition. |
 
 ### Write (9)
 
@@ -116,7 +117,7 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `snapshot_loadout` | Save the character's CURRENT equipment into an in-game loadout slot (overwrites that slot). |
 | `pull_from_postmaster` | Pull an item from the postmaster to the character. Find postmaster items via search_inventory (they sit in the Lost Items bucket). |
 | `set_lock_state` | Lock or unlock an item (protects from dismantle in game). |
-| `insert_plug` | Socket a mod/aspect/fragment/free perk into an item (armor mods, subclass configuration, crafted weapon free swaps). plug = exact name or hash. socket_index from get_item_details. Only FREE socket operations work (Bungie blocks paid ones for all third-party apps). |
+| `insert_plug` | Socket mods/aspects/fragments/free perks into one item — pass every socket in a single `plugs` array. plug = exact name or hash; socket indexes from get_item_details. A failed socket is reported without aborting the rest. Only FREE socket operations work (Bungie blocks paid ones for all third-party apps). |
 | `change_subclass` | Equip a subclass by name (e.g. "Solar", "Prismatic") and optionally configure its super/aspects/fragments in one call. For plugs: first call get_item_details on the subclass instance to see socket indexes. |
 
 ### Raw (1)

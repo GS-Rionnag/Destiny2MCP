@@ -18,6 +18,26 @@ async function post(path: string, body: Record<string, unknown>) {
   return bungieFetch(path, { method: 'POST', auth: true, body: { ...body, membershipType: a.membershipType } });
 }
 
+const plugSchema = z.object({ socket_index: z.number().int().min(0), plug: z.string() });
+
+// One failing socket must not abandon the rest of the loadout — report per plug instead.
+async function insertPlugs(itemId: string, characterId: string, plugs: z.infer<typeof plugSchema>[]) {
+  const out: string[] = [];
+  for (const p of plugs) {
+    try {
+      const plugItemHash = resolvePlugHash(p.plug);
+      await post(`${ACTIONS}/Items/InsertSocketPlugFree/`, {
+        plug: { socketIndex: p.socket_index, socketArrayType: 0, plugItemHash },
+        itemId, characterId,
+      });
+      out.push(`Socket ${p.socket_index} → ${defName('DestinyInventoryItemDefinition', plugItemHash)}.`);
+    } catch (e: any) {
+      out.push(`Socket ${p.socket_index} FAILED: ${e?.message ?? e}`);
+    }
+  }
+  return out;
+}
+
 export function registerWriteTools(server: McpServer): void {
   server.registerTool('transfer_item', {
     description: 'Move an item between a character and the vault. Get item_instance_id + item_hash from search_inventory. To move char→char: transfer to vault first, then vault→other char.',
@@ -102,28 +122,21 @@ export function registerWriteTools(server: McpServer): void {
   }));
 
   server.registerTool('insert_plug', {
-    description: 'Socket a mod/aspect/fragment/free perk into an item (armor mods, subclass configuration, crafted weapon free swaps). plug = exact name or hash. socket_index from get_item_details. Only FREE socket operations work (Bungie blocks paid ones for all third-party apps).',
+    description: 'Socket mods/aspects/fragments/free perks into ONE item (armor mods, subclass config, crafted weapon free swaps). Pass every socket you want to change in one call — do not call this once per mod. plug = exact name or hash; socket indexes from get_item_details (use include_plug_options to see what each socket accepts). Only FREE socket operations work (Bungie blocks paid ones for all third-party apps).',
     inputSchema: z.object({
       item_instance_id: z.string(),
       character_id: z.string(),
-      socket_index: z.number().int().min(0),
-      plug: z.string().describe('Exact plug name (e.g. "Grenade Kickstart") or numeric hash'),
+      plugs: z.array(plugSchema).min(1).max(12).describe('e.g. [{"socket_index":1,"plug":"Grenade Kickstart"}]'),
     }),
-  }, tool(async ({ item_instance_id, character_id, socket_index, plug }) => {
-    const plugItemHash = resolvePlugHash(plug);
-    await post(`${ACTIONS}/Items/InsertSocketPlugFree/`, {
-      plug: { socketIndex: socket_index, socketArrayType: 0, plugItemHash },
-      itemId: item_instance_id, characterId: character_id,
-    });
-    return `Socketed ${defName('DestinyInventoryItemDefinition', plugItemHash)} into socket ${socket_index}.`;
-  }));
+  }, tool(async ({ item_instance_id, character_id, plugs }) =>
+    (await insertPlugs(item_instance_id, character_id, plugs)).join('\n')));
 
   server.registerTool('change_subclass', {
     description: 'Equip a subclass by element or name (e.g. "Solar", "Gunslinger", "Prismatic") and optionally configure its super/aspects/fragments in one call. For plugs: first call get_item_details on the subclass instance to see socket indexes.',
     inputSchema: z.object({
       character_id: z.string(),
       subclass_name: z.string(),
-      plugs: z.array(z.object({ socket_index: z.number().int().min(0), plug: z.string() })).default([]),
+      plugs: z.array(plugSchema).default([]),
     }),
   }, tool(async ({ character_id, subclass_name, plugs }) => {
     const a = await getAccount();
@@ -149,14 +162,7 @@ export function registerWriteTools(server: McpServer): void {
       await post(`${ACTIONS}/Items/EquipItem/`, { itemId: subclass.itemInstanceId, characterId: character_id });
     }
     const results = [alreadyEquipped ? `Already equipped: ${name}.` : `Equipped ${name}.`];
-    for (const p of plugs) {
-      const plugItemHash = resolvePlugHash(p.plug);
-      await post(`${ACTIONS}/Items/InsertSocketPlugFree/`, {
-        plug: { socketIndex: p.socket_index, socketArrayType: 0, plugItemHash },
-        itemId: subclass.itemInstanceId, characterId: character_id,
-      });
-      results.push(`Socket ${p.socket_index} → ${defName('DestinyInventoryItemDefinition', plugItemHash)}.`);
-    }
+    results.push(...await insertPlugs(subclass.itemInstanceId, character_id, plugs));
     return results.join('\n');
   }));
 }

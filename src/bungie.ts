@@ -26,7 +26,21 @@ export interface FetchOpts {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ponytail: 60s TTL cache on GETs, wiped wholesale by any write. Single-user server, so no
+// size cap and no per-key invalidation — add those if this ever serves more than one account.
+const CACHE_TTL_MS = 60_000;
+const cache = new Map<string, { at: number; data: unknown }>();
+
+export const clearCache = () => cache.clear();
+
 export async function bungieFetch<T = any>(path: string, opts: FetchOpts = {}, retried = false): Promise<T> {
+  const method = opts.method ?? 'GET';
+  const key = method === 'GET' ? `${opts.auth ? 'a' : '-'}${path}?${JSON.stringify(opts.query ?? {})}` : '';
+  if (key) {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data as T;
+  }
+
   const wait = lastRequest + MIN_INTERVAL_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastRequest = Date.now();
@@ -40,7 +54,7 @@ export async function bungieFetch<T = any>(path: string, opts: FetchOpts = {}, r
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 
   const res = await fetch(url, {
-    method: opts.method ?? 'GET',
+    method,
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
@@ -58,6 +72,8 @@ export async function bungieFetch<T = any>(path: string, opts: FetchOpts = {}, r
     }
     throw new BungieError(data.ErrorStatus ?? 'Unknown', data.Message ?? 'Unknown Bungie error', data.ErrorCode ?? -1, data.ThrottleSeconds ?? 0);
   }
+  if (method !== 'GET') cache.clear(); // a write just changed game state — nothing cached is trustworthy
+  if (key) cache.set(key, { at: Date.now(), data: data.Response });
   return data.Response as T;
 }
 

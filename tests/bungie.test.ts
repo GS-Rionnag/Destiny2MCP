@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { bungieFetch, BungieError } from '../src/bungie.js';
+import { bungieFetch, BungieError, clearCache } from '../src/bungie.js';
 
 const envelope = (over: object) => ({
   ok: true,
   json: async () => ({ ErrorCode: 1, ErrorStatus: 'Success', Message: 'Ok', ThrottleSeconds: 0, Response: { hello: 'world' }, ...over }),
 });
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => { clearCache(); vi.restoreAllMocks(); });
 
 describe('bungieFetch', () => {
   it('returns the Response field on success', async () => {
@@ -33,6 +33,19 @@ describe('bungieFetch', () => {
   it('maps ErrorCode 5 to maintenance message', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope({ ErrorCode: 5, ErrorStatus: 'SystemDisabled', Message: 'x' })));
     await expect(bungieFetch('/Test/')).rejects.toThrowError(/maintenance/);
+  });
+
+  it('caches repeat GETs, keys on query, and drops the cache after a write', async () => {
+    const f = vi.fn(async () => envelope({}));
+    vi.stubGlobal('fetch', f);
+    await bungieFetch('/Test/', { query: { c: '100' } });
+    await bungieFetch('/Test/', { query: { c: '100' } });
+    expect(f).toHaveBeenCalledTimes(1);           // second call served from cache
+    await bungieFetch('/Test/', { query: { c: '200' } });
+    expect(f).toHaveBeenCalledTimes(2);           // different query = different key
+    await bungieFetch('/Act/', { method: 'POST', body: {} });
+    await bungieFetch('/Test/', { query: { c: '100' } });
+    expect(f).toHaveBeenCalledTimes(4);           // write invalidated the cached GET
   });
 
   it('retries once after ThrottleSeconds', async () => {
