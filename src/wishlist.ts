@@ -146,6 +146,36 @@ export function matchItem(
   return best;
 }
 
+export interface WishlistRoll {
+  perks: string[];
+  note: WishlistNote | undefined;
+}
+
+/**
+ * Every wish-listed roll for an item hash, whether or not the account owns one.
+ *
+ * matchItem answers "is THIS copy a god roll"; this answers "what would a god roll look like",
+ * which is the question you ask about a weapon you are still chasing. `text` keeps only rolls
+ * whose note, tags or source mention it (e.g. "pvp").
+ */
+export function rollsFor(itemHash: number, text?: string): WishlistRoll[] {
+  if (!open()) return [];
+  const rows = stmts!.rolls.all(itemHash) as { perks: string; noteId: number }[];
+  const needle = text?.toLowerCase();
+  const noteCache = new Map<number, WishlistNote | undefined>();
+  const note = (id: number) => {
+    if (!noteCache.has(id)) noteCache.set(id, getNote(id));
+    return noteCache.get(id);
+  };
+  const out: WishlistRoll[] = [];
+  for (const r of rows) {
+    const n = note(r.noteId);
+    if (needle && !(n && [n.title, n.tags, n.text].join(' ').toLowerCase().includes(needle))) continue;
+    out.push({ perks: r.perks.split('|'), note: n });
+  }
+  return out;
+}
+
 /* **** Building the index **** */
 
 interface ParsedRoll {

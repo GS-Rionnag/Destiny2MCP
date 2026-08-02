@@ -13,6 +13,7 @@ import { registerWriteTools } from './tools/write.js';
 import { registerRawTool } from './tools/raw.js';
 import { registerProgressTools } from './tools/progress.js';
 import { registerBuildTools } from './tools/builds.js';
+import { registerCatalogTools } from './tools/catalog.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
@@ -46,6 +47,11 @@ indexed locally. search_inventory "is:godroll" finds every wish-listed roll in t
 (plugged now, or one perk swap away) and tags each one (PvE-Boss, PvP-God, ...). Then
 get_item_details returns the reviewer's full write-up on WHY that roll works. Build loadouts
 from that, not from memory of an older sandbox.
+
+Gear the player does NOT own is search_items (whole-manifest catalog, DIM syntax) and then
+inspect_item, which returns base stats, every perk each column can roll, and the community
+god rolls for that item with the reviewers' notes — including for weapons nobody in the account
+has ever held. "What is the god roll for X" is inspect_item, never memory.
 
 For a recurring or scheduled check ("tell me what dropped"), use get_new_items, never
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
@@ -81,12 +87,13 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.11.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.12.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
   registerProgressTools(server);
   registerBuildTools(server);
+  registerCatalogTools(server);
   return server;
 }
 

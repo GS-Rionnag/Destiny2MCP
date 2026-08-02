@@ -154,6 +154,11 @@ function statNames(): Map<number, string> {
   return statNameByHash!;
 }
 
+/** The key a stat hash is stored under on SearchItem.stats — so other builders key items the same way. */
+export function statKey(hash: number): string | undefined {
+  return statNames().get(hash);
+}
+
 /** Resolve a stat keyword (including Armor 2.0 aliases) to the name items are keyed by. */
 function canonicalStat(name: string): string | undefined {
   const hash = stats().get(name);

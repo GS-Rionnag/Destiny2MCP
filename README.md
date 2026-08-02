@@ -107,7 +107,7 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (32)
+## Tools (34)
 
 ### Read (17)
 
@@ -154,6 +154,17 @@ Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http:
 | `bungie_api_call` | Escape hatch: call ANY Bungie.net Platform endpoint directly. path is relative to /Platform, e.g. "/Destiny2/Manifest/". Prefer the specific tools when one fits; responses here are raw JSON with unresolved hashes. |
 
 The spec behind the first two is downloaded once (1.8MB) to `data/openapi.json` on first use. Delete that file to pick up Bungie's latest.
+
+### Game catalog (2)
+
+Every item in the game, from the local manifest — for designing builds around gear the account does not own.
+
+| Tool | Description |
+|------|-------------|
+| `search_items` | The same [DIM query syntax](#dim-search-syntax) as `search_inventory`, run against the whole manifest: `is:handcannon is:legendary is:void`, `is:exotic is:warlock is:gauntlets`, `stat:range:>=70 is:pulserifle`. Here `perk:` and `is:godroll` mean **can roll** it, since a catalog item has no fixed roll. Reissues of one weapon collapse into a single row (`versions`). Instance-only filters (`power:`, `is:masterwork`, `is:dupe`) match nothing — those need `search_inventory`. |
+| `inspect_item` | One item by name or hash: base stats, and every perk each socket column can roll with its description — plus the [god rolls](#god-rolls) for it, aggregated from the DIM wish list: how many wish-listed rolls want each perk per column, the top trait combinations, and the reviewers' notes. Answers "what is the god roll for X" for a weapon the player has never seen. `godrolls: "pvp"` narrows to rolls whose notes/tags say so. |
+
+The first perk-aware query resolves every socket pool in the game (~10s, once per process); afterwards it is cached and answers in well under a second. Plain queries build a lighter catalog in ~1.5s.
 
 ### Builds (3)
 
