@@ -148,6 +148,7 @@ export function registerReadTools(server: McpServer): void {
 
   server.registerTool('search_inventory', {
     description: `Search ALL items across every character and the vault with DIM search syntax. Returns the instance ids that transfer/equip/insert_plug need.
+Only gear the account OWNS — for anything it does not, search_items runs the same syntax over every item in the game.
 
 One query replaces several searches — combine every condition instead of calling this per slot.
 Every supported keyword is listed at the end of this description; an unknown one is an error, not

@@ -42,16 +42,31 @@ or/-/parens). Put every condition in one query — "is:armor is:hunter -is:exoti
 stat:resilience:>=20" answers in one call what seven name/type searches cannot. Add
 sort to get the highest few instead of a list to scan.
 
-Judging whether a weapon is good is not yours to guess — the community DIM wish list is
-indexed locally. search_inventory "is:godroll" finds every wish-listed roll in the account
-(plugged now, or one perk swap away) and tags each one (PvE-Boss, PvP-God, ...). Then
-get_item_details returns the reviewer's full write-up on WHY that roll works. Build loadouts
-from that, not from memory of an older sandbox.
+Three different questions about gear, three different tools — mixing them up is the most
+common mistake:
+- "what do I have" -> search_inventory (the account; instance ids; power, masterwork, dupes)
+- "what exists in the game" -> search_items (every manifest item, same DIM syntax, no instances)
+- "everything about this one item" -> inspect_item (base stats, every perk each column can
+  roll, and the community god rolls for it — works for gear the account has never seen)
 
-Gear the player does NOT own is search_items (whole-manifest catalog, DIM syntax) and then
-inspect_item, which returns base stats, every perk each column can roll, and the community
-god rolls for that item with the reviewers' notes — including for weapons nobody in the account
-has ever held. "What is the god roll for X" is inspect_item, never memory.
+Judging whether a weapon is good is not yours to guess: the community DIM wish list is indexed
+locally and both paths read it.
+- Owned copy: search_inventory "is:godroll" (matches plugged, or one perk swap away), then
+  get_item_details for the reviewer's write-up on WHY that roll works.
+- Any weapon at all, owned or not: inspect_item name:"Fatebringer" -> topRolls (trait
+  combinations ranked by how many wish-listed rolls want them), mostWantedPerks (per-column
+  vote counts) and notes (the reviewers' own words). Add godrolls:"pvp" to keep only rolls
+  whose notes/tags say PvP. Answer "what is the god roll for X" from this, never from memory
+  of an older sandbox.
+
+On search_items, perk: and is:godroll mean CAN ROLL — "is:sniperrifle perk:'firing line'" is
+every sniper whose loot pool contains it, not one the player owns. Its stats are the
+definition's BASE values, before perks and masterwork, so use them to compare frames, then
+inspect_item for the perk pool that decides the roll.
+
+Building a loadout end to end: search_builds for what the community runs -> inspect_item on
+each exotic and weapon in it for the perks that matter -> search_inventory to see what the
+account already has (is:godroll included) -> name the gap that has to drop.
 
 For a recurring or scheduled check ("tell me what dropped"), use get_new_items, never
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
@@ -87,7 +102,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.12.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.12.1' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
