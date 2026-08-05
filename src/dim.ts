@@ -130,7 +130,7 @@ export function armorSet(itemHash: number): any | undefined {
   }
   return setsByItem.get(itemHash);
 }
-export function resetSetCache(): void { setsByItem = null; liveArtifact = undefined; }
+export function resetSetCache(): void { setsByItem = null; liveArtifact = undefined; artifactNames = null; }
 
 /**
  * Only the artifact that is live right now ships with its tiers populated — retired ones survive
@@ -151,23 +151,54 @@ function currentArtifact() {
   return liveArtifact;
 }
 
+/** Every seasonal artifact ever, by name — about twenty, all distinctive multi-word names. */
+let artifactNames: { name: string; season: number }[] | null = null;
+function seasonalArtifacts() {
+  artifactNames ??= eachDef('DestinySeasonDefinition')
+    .filter((s: any) => s.artifactItemHash)
+    .map((s: any) => ({ name: defName(I, s.artifactItemHash), season: s.seasonNumber }))
+    .filter((a: any) => a.name && !a.name.startsWith('#'));
+  return artifactNames;
+}
+
 /**
  * A share stores the artifact perks that were unlocked when it was saved. Report which artifact
- * they are, and whether that is the one in the game today — otherwise the only artifact signal in
- * the response is a season number and whatever the author typed in the notes, and those two
- * disagreeing is exactly how a stale build gets read as the current one.
+ * they are, whether that is the one in the game today, and — when the author's notes name an
+ * artifact of their own — which of the two is out of date.
+ *
+ * Notes and saved perks disagreeing is normal: notes get copy-pasted between builds and go stale
+ * while the perk hashes do not. Leaving a reader to spot that on its own is how a build gets read
+ * off the wrong artifact, so the disagreement is resolved here rather than described.
  */
-function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUnlocks']) {
+function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUnlocks'], notes?: string) {
   if (!art) return undefined;
   const live = currentArtifact();
   const hashes = art.unlockedItemHashes ?? [];
   const fromLive = live ? hashes.filter((h) => live.perks.has(h)).length : 0;
   const current = !!live && hashes.length > 0 && fromLive === hashes.length;
+  const name = current ? live!.name : undefined;
+
+  // Only exact artifact names count as a mention — no guessing at what free text meant.
+  const lower = (notes ?? '').toLowerCase();
+  const mentioned = seasonalArtifacts().find((a) => lower.includes(a.name.toLowerCase()));
+  const saved = seasonalArtifacts().find((a) => a.name === name);
+
+  let conflict: string | undefined;
+  if (mentioned && mentioned.name !== name) {
+    conflict = `The notes name "${mentioned.name}" (Season ${mentioned.season}), but the perks saved in this build are ${
+      current
+        ? `from ${name}${saved ? ` (Season ${saved.season})` : ''}, the artifact live in the game today — so the NOTES are out of date and the perk list below is what this build actually runs.`
+        : 'from neither. Both are historical; check the current artifact before building off either.'
+    }`;
+  }
+
   return {
     // The share's own count, which is DIM's season numbering — not the manifest's.
     seasonPerDim: art.seasonNumber,
-    name: current ? live!.name : undefined,
+    name,
     current,
+    notesMentionArtifact: mentioned?.name,
+    conflict,
     note: current
       ? undefined
       : `these perks are not (all) from ${live?.name ?? 'the live artifact'}, the seasonal artifact in the game today — they are a snapshot from when the build was saved${fromLive ? ` (${fromLive} of ${hashes.length} still current)` : ''}`,
@@ -289,7 +320,7 @@ export function describeLoadout(loadout: DimLoadout, shareId?: string) {
     otherItems: other.length ? other : undefined,
     mods: modsBySlot(loadout.parameters?.mods),
     fashion: Object.keys(fashion).length ? fashion : undefined,
-    artifact: describeArtifact(loadout.parameters?.artifactUnlocks),
+    artifact: describeArtifact(loadout.parameters?.artifactUnlocks, loadout.notes),
     searchQuery: loadout.parameters?.query,
     unequipped: loadout.unequipped?.length
       ? loadout.unequipped.map((e) => ({ name: defName(I, e.hash), hash: e.hash })) : undefined,

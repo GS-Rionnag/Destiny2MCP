@@ -24,6 +24,8 @@ const ITEMS: Record<number, any> = {
   81: { hash: 81, displayProperties: { name: 'Overload Bow' } },
   82: { hash: 82, displayProperties: { name: 'Elemental Siphon' } },
   83: { hash: 83, displayProperties: { name: 'Retired Perk' } },
+  84: { hash: 84, displayProperties: { name: 'Retired Artifact' } },
+  85: { hash: 85, displayProperties: { name: 'Live Artifact' } },
 };
 
 vi.mock('../src/manifest.js', () => ({
@@ -35,6 +37,8 @@ vi.mock('../src/manifest.js', () => ({
   eachDef: (table: string) => table === 'DestinyArtifactDefinition'
     // Only the live artifact ships with tiers; retired ones are a name in the item table.
     ? [{ hash: 800, displayProperties: { name: 'Live Artifact' }, tiers: [{ items: [{ itemHash: 81 }, { itemHash: 82 }] }] }]
+    : table === 'DestinySeasonDefinition'
+    ? [{ seasonNumber: 26, artifactItemHash: 84 }, { seasonNumber: 27, artifactItemHash: 85 }]
     : [{
       hash: 900, displayProperties: { name: 'Testwear' }, setItems: [50],
       setPerks: [{ requiredSetCount: 2, sandboxPerkHash: 901 }],
@@ -103,16 +107,27 @@ describe('describeLoadout', () => {
     expect(out.armor[0].exoticPerk).toEqual({ name: 'Big Perk', description: 'Does the thing.' });
   });
 
-  const withArtifact = (unlockedItemHashes: number[]) => describeLoadout({
-    name: 'B', classType: 2, equipped: [],
+  const withArtifact = (unlockedItemHashes: number[], notes?: string) => describeLoadout({
+    name: 'B', classType: 2, equipped: [], notes,
     parameters: { artifactUnlocks: { seasonNumber: 28, unlockedItemHashes } },
   } as any) as any;
 
   it('names the artifact a build was saved on so the notes cannot be believed over it', () => {
     expect(withArtifact([81, 82]).artifact).toEqual({
       seasonPerDim: 28, name: 'Live Artifact', current: true, note: undefined,
+      notesMentionArtifact: undefined, conflict: undefined,
       perks: ['Overload Bow', 'Elemental Siphon'],
     });
+  });
+
+  it('resolves the disagreement when the notes name a different artifact', () => {
+    const a = withArtifact([81, 82], 'Run Retired Artifact: dielectric, flashover').artifact;
+    expect(a.notesMentionArtifact).toBe('Retired Artifact');
+    expect(a.conflict).toMatch(/"Retired Artifact" \(Season 26\).*NOTES are out of date/s);
+  });
+
+  it('says nothing when the notes name the artifact the build was actually saved on', () => {
+    expect(withArtifact([81, 82], 'Live Artifact: siphon').artifact.conflict).toBeUndefined();
   });
 
   it('flags perks that are not all from the artifact in the game today', () => {
