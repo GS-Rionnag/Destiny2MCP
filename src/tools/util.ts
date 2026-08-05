@@ -1,4 +1,19 @@
 import { BungieError } from '../bungie.js';
+import { getDef } from '../manifest.js';
+
+/** What socket i of an item actually accepts. The API only fills reusablePlugs for weapon-style
+ * sockets; armor mods and subclass fragments have to come from the manifest plug set the socket
+ * points at. */
+export function socketPlugPool(reusable: Record<string, any[]>, socketEntries: any[], i: number): number[] {
+  const live = (reusable[String(i)] ?? []).filter((p) => p.canInsert).map((p) => p.plugItemHash);
+  if (live.length) return live;
+  const e = socketEntries[i] ?? {};
+  const setHash = e.reusablePlugSetHash ?? e.randomizedPlugSetHash;
+  const fromSet = setHash
+    ? (getDef('DestinyPlugSetDefinition', setHash)?.reusablePlugItems ?? [])
+    : (e.reusablePlugItems ?? []);
+  return fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
+}
 
 export type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 

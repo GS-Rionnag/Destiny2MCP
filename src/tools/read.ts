@@ -5,7 +5,7 @@ import { defName, getDef, searchDefs } from '../manifest.js';
 import { SEARCH_COMPONENTS, SEARCH_COMPONENTS_GODROLL, SEARCH_HELP, buildItems, compileQuery, itemPower, sortItems, statValue, type SearchItem } from '../search/index.js';
 import { getNote, matchItem, rebuildWishlist, wishlistMeta, wishlistReady } from '../wishlist.js';
 import { maxId, newerThan, readMarks, saveMark } from '../watermark.js';
-import { tool } from './util.js';
+import { socketPlugPool, tool } from './util.js';
 
 export function itemSummary(item: any, instances?: Record<string, any>) {
   const def = getDef('DestinyInventoryItemDefinition', item.itemHash);
@@ -344,17 +344,7 @@ For "what did I just get" in a normal conversation use search_inventory with sor
       // whole-item response; option_offset/nextOffset make the rest reachable when you actually want them.
       const options = (i: number) => {
         if (!include_plug_options || (socket_index !== undefined && i !== socket_index)) return undefined;
-        // The API only fills reusablePlugs for weapon-style sockets; armor mods and subclass
-        // fragments have to come from the manifest plug set the socket points at.
-        let hashes: number[] = (reusable[String(i)] ?? []).filter((p: any) => p.canInsert).map((p: any) => p.plugItemHash);
-        if (!hashes.length) {
-          const e = socketEntries[i] ?? {};
-          const setHash = e.reusablePlugSetHash ?? e.randomizedPlugSetHash;
-          const fromSet = setHash
-            ? (getDef('DestinyPlugSetDefinition', setHash)?.reusablePlugItems ?? [])
-            : (e.reusablePlugItems ?? []);
-          hashes = fromSet.filter((p: any) => p.currentlyCanRoll !== false).map((p: any) => p.plugItemHash);
-        }
+        const hashes = socketPlugPool(reusable, socketEntries, i);
         // Plug sets carry several hashes per name (energy tiers, legacy copies) — one per name is enough to pick from.
         // Nameless plugs are hidden intrinsics the game never offers; listing them as "#969663972" is pure noise.
         const byName = new Map<string, number>();

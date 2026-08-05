@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { bungieFetch, getAccount } from '../bungie.js';
+import { BungieError, bungieFetch, getAccount } from '../bungie.js';
 import { defName, eachDef, firstHash, getDef, searchDefs } from '../manifest.js';
-import { tool } from './util.js';
+import { socketPlugPool, tool } from './util.js';
 
 const ACTIONS = '/Destiny2/Actions';
 
@@ -31,8 +31,14 @@ async function currentLoadout(characterId: string, index: number) {
   return lo;
 }
 
-export function resolvePlugHash(plug: string): number {
+export function resolvePlugHash(plug: string, socketPool?: number[]): number {
   if (/^\d+$/.test(plug)) return Number(plug);
+  // Many plug names map to several manifest rows (legacy vs current mod variants, 42 different
+  // "Empty Mod Socket"s) — only the socket's own option list knows which hash this item accepts.
+  const q = plug.toLowerCase();
+  for (const h of socketPool ?? []) {
+    if (getDef('DestinyInventoryItemDefinition', h)?.displayProperties?.name?.toLowerCase() === q) return h;
+  }
   const hit = searchDefs(plug, 'DestinyInventoryItemDefinition', 1)[0];
   if (!hit) throw new Error(`No mod/perk named "${plug}" found. Use search_manifest to find the exact name.`);
   return hit.hash;
@@ -48,16 +54,29 @@ const plugSchema = z.object({ socket_index: z.number().int().min(0), plug: z.str
 // One failing socket must not abandon the rest of the loadout — report per plug instead.
 async function insertPlugs(itemId: string, characterId: string, plugs: z.infer<typeof plugSchema>[]) {
   const out: string[] = [];
+  let reusable: Record<string, any[]> = {};
+  let socketEntries: any[] = [];
+  try {
+    const a = await getAccount();
+    const r = await bungieFetch<any>(`/Destiny2/${a.membershipType}/Profile/${a.membershipId}/Item/${itemId}/`, {
+      auth: true, query: { components: '307,310' },
+    });
+    reusable = r.reusablePlugs?.data?.plugs ?? {};
+    socketEntries = getDef('DestinyInventoryItemDefinition', r.item?.data?.itemHash ?? 0)?.sockets?.socketEntries ?? [];
+  } catch { /* item unreadable — names fall back to the global search below */ }
   for (const p of plugs) {
+    let plugItemHash = 0;
     try {
-      const plugItemHash = resolvePlugHash(p.plug);
+      plugItemHash = resolvePlugHash(p.plug, socketPlugPool(reusable, socketEntries, p.socket_index));
       await post(`${ACTIONS}/Items/InsertSocketPlugFree/`, {
         plug: { socketIndex: p.socket_index, socketArrayType: 0, plugItemHash },
         itemId, characterId,
       });
-      out.push(`Socket ${p.socket_index} → ${defName('DestinyInventoryItemDefinition', plugItemHash)}.`);
+      out.push(`Socket ${p.socket_index} → ${defName('DestinyInventoryItemDefinition', plugItemHash)} (${plugItemHash}).`);
     } catch (e: any) {
-      out.push(`Socket ${p.socket_index} FAILED: ${e?.message ?? e}`);
+      const sent = plugItemHash ? ` inserting ${defName('DestinyInventoryItemDefinition', plugItemHash)} (${plugItemHash})` : '';
+      const detail = e instanceof BungieError ? `${e.errorStatus}: ${e.message}` : `${e?.message ?? e}`;
+      out.push(`Socket ${p.socket_index} FAILED${sent}: ${detail}`);
     }
   }
   return out;

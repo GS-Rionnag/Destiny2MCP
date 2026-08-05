@@ -6,12 +6,16 @@ vi.mock('../src/bungie.js', () => ({
   BungieError: class BungieError extends Error {},
 }));
 vi.mock('../src/manifest.js', () => ({
-  searchDefs: vi.fn((q: string) => (q === 'Sunshot' ? [{ hash: 555, name: 'Sunshot' }] : [])),
+  searchDefs: vi.fn((q: string) => (
+    q === 'Sunshot' ? [{ hash: 555, name: 'Sunshot' }]
+    : q === 'Void Resistance' ? [{ hash: 999999, name: 'Void Resistance' }] // wrong global variant
+    : [])),
   eachDef: vi.fn(() => [{ name: 'Raid', hash: 900 }, { name: 'PvP', hash: 901 }]),
   firstHash: vi.fn(() => 111),
   defName: vi.fn(() => 'X'),
-  getDef: vi.fn((_t: string, hash: number) => hash === 777
-    ? { itemType: 16, displayProperties: { name: 'Gunslinger' }, talentGrid: { hudDamageType: 3 } }
+  getDef: vi.fn((_t: string, hash: number) =>
+    hash === 777 ? { itemType: 16, displayProperties: { name: 'Gunslinger' }, talentGrid: { hudDamageType: 3 } }
+    : hash === 424242 ? { displayProperties: { name: 'Void Resistance' } }
     : undefined),
 }));
 
@@ -61,6 +65,46 @@ describe('write tools', () => {
     });
     expect(res.content[0].text).toMatch(/Socket 4 FAILED/);
     expect(vi.mocked(bungieFetch).mock.calls.filter(([p]) => p.includes('InsertSocketPlugFree'))).toHaveLength(1);
+  });
+
+  it('insert_plug resolves a name against the socket\'s own options, not the global name index', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) =>
+      (path.includes('/Item/')
+        ? {
+            item: { data: { itemHash: 1 } },
+            reusablePlugs: { data: { plugs: { '3': [{ plugItemHash: 424242, canInsert: true }] } } },
+          }
+        : {}) as any);
+    await capture().insert_plug({
+      item_instance_id: 'IID', character_id: 'C1',
+      plugs: [{ socket_index: 3, plug: 'Void Resistance' }],
+    });
+    expect(bungieFetch).toHaveBeenCalledWith('/Destiny2/Actions/Items/InsertSocketPlugFree/', {
+      method: 'POST', auth: true,
+      body: {
+        plug: { socketIndex: 3, socketArrayType: 0, plugItemHash: 424242 },
+        itemId: 'IID', characterId: 'C1', membershipType: 3,
+      },
+    });
+  });
+
+  it('insert_plug failure line names the plug hash it sent and the Bungie error status', async () => {
+    const { BungieError } = await import('../src/bungie.js');
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) => {
+      if (path.includes('InsertSocketPlugFree')) {
+        const e: any = new (BungieError as any)();
+        e.message = 'This action can only be done in-game.';
+        e.errorStatus = 'DestinyItemActionForbidden';
+        throw e;
+      }
+      return {} as any;
+    });
+    const res = await capture().insert_plug({
+      item_instance_id: 'IID', character_id: 'C1',
+      plugs: [{ socket_index: 4, plug: 'Sunshot' }],
+    });
+    expect(res.content[0].text).toMatch(/555/);
+    expect(res.content[0].text).toMatch(/DestinyItemActionForbidden/);
   });
 
   it('resolvePlugHash: numeric passthrough, unknown name throws readable', () => {
