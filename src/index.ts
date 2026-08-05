@@ -14,6 +14,7 @@ import { registerRawTool } from './tools/raw.js';
 import { registerProgressTools } from './tools/progress.js';
 import { registerBuildTools } from './tools/builds.js';
 import { registerCatalogTools } from './tools/catalog.js';
+import { registerDimTools } from './tools/dim.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
@@ -68,6 +69,16 @@ Building a loadout end to end: search_builds for what the community runs -> insp
 each exotic and weapon in it for the perks that matter -> search_inventory to see what the
 account already has (is:godroll included) -> name the gap that has to drop.
 
+Someone pastes a DIM link (dim.gg/... or the dimLink get_build returns): dim_build reads it. One
+call, no account, returns the author's notes, the subclass with its aspects and fragments, weapons,
+armor with exotic perks and set bonuses, every mod grouped by slot with its energy cost, and the
+artifact perks — that answers "what is special about this build".
+To then wear it, drive the writes yourself: the share's instance ids belong to whoever shared it,
+so take the HASHES into search_inventory to find the account's own copies, then transfer_item ->
+equip_items -> insert_plug (get_item_details with include_plug_options for the socket indexes of
+the piece actually being worn). Substitute armor where a piece is missing; never substitute an
+exotic or a weapon silently — say what is missing.
+
 For a recurring or scheduled check ("tell me what dropped"), use get_new_items, never
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
 reports each drop exactly once even though the run that calls it remembers nothing.
@@ -102,13 +113,14 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.12.1' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.13.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
   registerProgressTools(server);
   registerBuildTools(server);
   registerCatalogTools(server);
+  registerDimTools(server);
   return server;
 }
 

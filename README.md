@@ -107,7 +107,7 @@ claude mcp add --transport http destiny2 http://localhost:7777/mcp
 
 Claude Desktop: **Settings → Connectors → Add custom connector**, URL `http://localhost:7777/mcp`.
 
-## Tools (34)
+## Tools (35)
 
 ### Read (17)
 
@@ -175,6 +175,29 @@ Community and editorial builds from [Mobalytics](https://mobalytics.gg/destiny-2
 | `search_builds` | Search builds by `class`, `subclass`, `type` (pve/pvp), `tags` (AND), `weapon`/`armor`/`exotic` by name, `author`, `sort` (`trending`/`new`/`top`/`featured`) and `time` (`today`/`week`/`month`). `source: meta` searches Mobalytics' editorial builds instead of player-published ones. Returns a preview card per build — super, abilities by slot, aspects, weapons with perks, armor with the exotic called out, tags, author, favorites — plus a `cursor` for the next page. |
 | `get_build` | Everything on one build id/slug: full loadout, armor exotic perks and set bonuses, mods per slot, fragments, stat priority, artifact perks, and the author's write-up — gameplay loop, how it works, in-depth sections, strengths/weaknesses, DIM import link, video guide. |
 | `find_build_item` | Name → Mobalytics item id, for when a weapon/armor name is ambiguous. `search_builds` resolves names on its own. |
+
+### DIM loadout shares (1)
+
+| Tool | Description |
+|------|-------------|
+| `dim_build` | Read a shared DIM loadout — `https://dim.gg/<id>/<name>`, any DIM url with `?loadout=…`, a bare share id, or the `dimLink` `get_build` returns — and return the whole build as JSON: the author's notes, subclass with super/abilities/aspects/fragments (each with its description and socket index), weapons, armor with exotic perks and armor-**set** bonuses, every mod grouped by slot with its energy cost, fashion, the seasonal artifact perks, and hashes throughout. Read-only. |
+
+`dim.gg/<shareId>/<slug>` is a redirect page whose "Open in DIM" link carries the loadout as a urlencoded JSON query param. The same document comes straight from DIM's API with **no key and no auth**:
+
+```
+GET https://api.destinyitemmanager.com/loadout_share?shareId=o3incja
+```
+
+(The `/profile` endpoints of [dim-api](https://github.com/DestinyItemManager/dim-api) need `X-API-Key` plus a bearer token; `loadout_share` is deliberately public so shared links work for anyone.)
+
+Everything in a share is hashes, resolved here against the local manifest:
+
+- **Subclass** config rides in `socketOverrides` on the subclass item — split out into super, class/movement/melee/grenade abilities, aspects and fragments, each with its in-game description.
+- **Mods** are one flat list with no slot attached. Each mod's `plug.plugCategoryIdentifier` says which slot it is restricted to (`enhancements.v2_head`, `…v2_arms`, `…v2_general`, the tuning category, …), so they come back grouped by slot with energy costs.
+- **Armor sets** come from `DestinyEquipableItemSetDefinition`, so a build wearing four matching legendaries reports the 2- and 4-piece bonuses and which are active — usually the whole reason those pieces are in the build.
+- **Notes** are free text and often name gear or artifact columns the loadout itself does not carry. Returned verbatim, never parsed as equipment.
+
+The tool stops there. Equipping is the model's job: the instance ids in a share belong to whoever shared it, so take the **hashes** into `search_inventory` to find the account's own copies, then `transfer_item` → `equip_items` → `insert_plug` (`get_item_details` with `include_plug_options` for the socket indexes of the piece actually being worn).
 
 Mobalytics sits behind Cloudflare, which fingerprints TLS and HTTP/2 — plain `fetch` gets a challenge page, so these tools go through `node-tls-client` (a real Chrome fingerprint). It downloads a ~16MB shared library on first run. If Cloudflare ever refuses every profile, the tools say so rather than returning empty results.
 
