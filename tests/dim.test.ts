@@ -114,7 +114,7 @@ describe('describeLoadout', () => {
 
   it('names the artifact a build was saved on so the notes cannot be believed over it', () => {
     expect(withArtifact([81, 82]).artifact).toEqual({
-      seasonPerDim: 28, name: 'Live Artifact', current: true, note: undefined,
+      savedInSeason: 28, name: 'Live Artifact', current: true, note: undefined,
       notesMentionArtifact: undefined, conflict: undefined,
       perks: ['Overload Bow', 'Elemental Siphon'],
     });
@@ -123,7 +123,9 @@ describe('describeLoadout', () => {
   it('resolves the disagreement when the notes name a different artifact', () => {
     const a = withArtifact([81, 82], 'Run Retired Artifact: dielectric, flashover').artifact;
     expect(a.notesMentionArtifact).toBe('Retired Artifact');
-    expect(a.conflict).toMatch(/"Retired Artifact" \(Season 26\).*NOTES are out of date/s);
+    expect(a.conflict).toMatch(/"Retired Artifact" \(the Season 26 artifact\).*NOTES are out of date/s);
+    // The live artifact carries across seasons, so no season number is claimed for it.
+    expect(a.conflict).not.toMatch(/Season 27/);
   });
 
   it('says nothing when the notes name the artifact the build was actually saved on', () => {

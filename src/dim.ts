@@ -181,20 +181,23 @@ function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUn
   // Only exact artifact names count as a mention — no guessing at what free text meant.
   const lower = (notes ?? '').toLowerCase();
   const mentioned = seasonalArtifacts().find((a) => lower.includes(a.name.toLowerCase()));
-  const saved = seasonalArtifacts().find((a) => a.name === name);
 
+  // Only the retired artifact gets a season number. A season's artifactItemHash says which season
+  // INTRODUCED that artifact, and the live one outlasts the season it arrived in — quoting that
+  // number for it would contradict seasonPerDim for no gain, when "live in the game today" is
+  // both what the reader needs and what the tiers check actually proves.
   let conflict: string | undefined;
   if (mentioned && mentioned.name !== name) {
-    conflict = `The notes name "${mentioned.name}" (Season ${mentioned.season}), but the perks saved in this build are ${
+    conflict = `The notes name "${mentioned.name}" (the Season ${mentioned.season} artifact), but the perks saved in this build are ${
       current
-        ? `from ${name}${saved ? ` (Season ${saved.season})` : ''}, the artifact live in the game today — so the NOTES are out of date and the perk list below is what this build actually runs.`
+        ? `from ${name}, the artifact live in the game today — so the NOTES are out of date and the perk list below is what this build actually runs.`
         : 'from neither. Both are historical; check the current artifact before building off either.'
     }`;
   }
 
   return {
-    // The share's own count, which is DIM's season numbering — not the manifest's.
-    seasonPerDim: art.seasonNumber,
+    // The season the build was saved in, as DIM stamped it.
+    savedInSeason: art.seasonNumber,
     name,
     current,
     notesMentionArtifact: mentioned?.name,
