@@ -114,7 +114,8 @@ describe('describeLoadout', () => {
 
   it('names the artifact a build was saved on so the notes cannot be believed over it', () => {
     expect(withArtifact([81, 82]).artifact).toEqual({
-      savedInSeason: 28, name: 'Live Artifact', current: true, note: undefined,
+      savedInSeason: 28, liveArtifact: 'Live Artifact', note: undefined,
+      perksStillOnLiveArtifact: '2 of 2', allPerksStillOnLiveArtifact: true,
       notesMentionArtifact: undefined, conflict: undefined,
       perks: ['Overload Bow', 'Elemental Siphon'],
     });
@@ -132,11 +133,13 @@ describe('describeLoadout', () => {
     expect(withArtifact([81, 82], 'Live Artifact: siphon').artifact.conflict).toBeUndefined();
   });
 
-  it('flags perks that are not all from the artifact in the game today', () => {
+  it('counts how many saved perks survive on the live artifact, not whether the artifact is current', () => {
     const a = withArtifact([81, 83]).artifact;
-    expect(a.current).toBe(false);
-    expect(a.name).toBeUndefined();
-    expect(a.note).toMatch(/Live Artifact.*1 of 2 still current/);
+    expect(a.allPerksStillOnLiveArtifact).toBe(false);
+    expect(a.perksStillOnLiveArtifact).toBe('1 of 2');
+    // The live artifact is still named even when the build's perks have moved on.
+    expect(a.liveArtifact).toBe('Live Artifact');
+    expect(a.note).toMatch(/1 of this build's artifact perks are no longer on Live Artifact/);
   });
 
   it('keeps the author notes verbatim rather than parsing gear out of them', () => {

@@ -177,6 +177,8 @@ function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUn
   const fromLive = live ? hashes.filter((h) => live.perks.has(h)).length : 0;
   const current = !!live && hashes.length > 0 && fromLive === hashes.length;
   const name = current ? live!.name : undefined;
+  // Named for what is actually checked. "current" read as a claim about the artifact, so a perk
+  // whose name sounds perennial (Overload Pulse Rifle) looked like it contradicted the flag.
 
   // Only exact artifact names count as a mention — no guessing at what free text meant.
   const lower = (notes ?? '').toLowerCase();
@@ -188,23 +190,28 @@ function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUn
   // both what the reader needs and what the tiers check actually proves.
   let conflict: string | undefined;
   if (mentioned && mentioned.name !== name) {
-    conflict = `The notes name "${mentioned.name}" (the Season ${mentioned.season} artifact), but the perks saved in this build are ${
+    conflict = `The notes name "${mentioned.name}" (the Season ${mentioned.season} artifact), but ${
       current
-        ? `from ${name}, the artifact live in the game today — so the NOTES are out of date and the perk list below is what this build actually runs.`
-        : 'from neither. Both are historical; check the current artifact before building off either.'
+        ? `every perk saved in this build is still on ${name}, the artifact live in the game today — so the NOTES are out of date and the perk list below is what this build actually runs.`
+        : 'the perks saved in this build are from neither. Both are historical; check the live artifact before building off either.'
     }`;
   }
 
   return {
     // The season the build was saved in, as DIM stamped it.
     savedInSeason: art.seasonNumber,
-    name,
-    current,
+    // The artifact in the game right now, whatever this build was saved on.
+    liveArtifact: live?.name,
+    // How many of the build's saved perks are still on that artifact. This is a statement about
+    // the PERKS, not about the artifact: an anti-Champion perk whose name recurs every season is
+    // still counted only when its exact hash is on the live artifact's columns.
+    perksStillOnLiveArtifact: `${fromLive} of ${hashes.length}`,
+    allPerksStillOnLiveArtifact: current,
     notesMentionArtifact: mentioned?.name,
     conflict,
     note: current
       ? undefined
-      : `these perks are not (all) from ${live?.name ?? 'the live artifact'}, the seasonal artifact in the game today — they are a snapshot from when the build was saved${fromLive ? ` (${fromLive} of ${hashes.length} still current)` : ''}`,
+      : `${hashes.length - fromLive} of this build's artifact perks are no longer on ${live?.name ?? 'the live artifact'} — the list below is a snapshot from when the build was saved, not what can be unlocked today`,
     perks: hashes.map((h) => defName(I, h)),
   };
 }
