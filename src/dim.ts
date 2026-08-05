@@ -130,7 +130,50 @@ export function armorSet(itemHash: number): any | undefined {
   }
   return setsByItem.get(itemHash);
 }
-export function resetSetCache(): void { setsByItem = null; }
+export function resetSetCache(): void { setsByItem = null; liveArtifact = undefined; }
+
+/**
+ * Only the artifact that is live right now ships with its tiers populated — retired ones survive
+ * in the item table as a name and nothing else. So the perk hashes themselves say whether a
+ * share's artifact is current, and no account call is needed to find out.
+ */
+let liveArtifact: { name?: string; perks: Set<number> } | null | undefined;
+function currentArtifact() {
+  if (liveArtifact === undefined) {
+    const a = eachDef('DestinyArtifactDefinition').find((x: any) => x.tiers?.length);
+    liveArtifact = a
+      ? {
+        name: a.displayProperties?.name,
+        perks: new Set<number>((a.tiers ?? []).flatMap((t: any) => (t.items ?? []).map((i: any) => i.itemHash))),
+      }
+      : null;
+  }
+  return liveArtifact;
+}
+
+/**
+ * A share stores the artifact perks that were unlocked when it was saved. Report which artifact
+ * they are, and whether that is the one in the game today — otherwise the only artifact signal in
+ * the response is a season number and whatever the author typed in the notes, and those two
+ * disagreeing is exactly how a stale build gets read as the current one.
+ */
+function describeArtifact(art: NonNullable<DimLoadout['parameters']>['artifactUnlocks']) {
+  if (!art) return undefined;
+  const live = currentArtifact();
+  const hashes = art.unlockedItemHashes ?? [];
+  const fromLive = live ? hashes.filter((h) => live.perks.has(h)).length : 0;
+  const current = !!live && hashes.length > 0 && fromLive === hashes.length;
+  return {
+    // The share's own count, which is DIM's season numbering — not the manifest's.
+    seasonPerDim: art.seasonNumber,
+    name: current ? live!.name : undefined,
+    current,
+    note: current
+      ? undefined
+      : `these perks are not (all) from ${live?.name ?? 'the live artifact'}, the seasonal artifact in the game today — they are a snapshot from when the build was saved${fromLive ? ` (${fromLive} of ${hashes.length} still current)` : ''}`,
+    perks: hashes.map((h) => defName(I, h)),
+  };
+}
 
 /** Split subclass socketOverrides into the pieces a player actually talks about. */
 function subclassSetup(item: DimLoadoutItem) {
@@ -230,8 +273,6 @@ export function describeLoadout(loadout: DimLoadout, shareId?: string) {
     fashion[slot] = entry;
   }
 
-  const art = loadout.parameters?.artifactUnlocks;
-
   return {
     shareId: shareId ?? loadout.id,
     name: loadout.name,
@@ -248,7 +289,7 @@ export function describeLoadout(loadout: DimLoadout, shareId?: string) {
     otherItems: other.length ? other : undefined,
     mods: modsBySlot(loadout.parameters?.mods),
     fashion: Object.keys(fashion).length ? fashion : undefined,
-    artifact: art ? { season: art.seasonNumber, perks: art.unlockedItemHashes.map((h) => defName(I, h)) } : undefined,
+    artifact: describeArtifact(loadout.parameters?.artifactUnlocks),
     searchQuery: loadout.parameters?.query,
     unequipped: loadout.unequipped?.length
       ? loadout.unequipped.map((e) => ({ name: defName(I, e.hash), hash: e.hash })) : undefined,

@@ -21,6 +21,9 @@ const ITEMS: Record<number, any> = {
   71: { hash: 71, displayProperties: { name: 'Chaos Reach' }, plug: { plugCategoryIdentifier: 'warlock.arc.supers' } },
   72: { hash: 72, displayProperties: { name: 'Arc Soul' }, plug: { plugCategoryIdentifier: 'warlock.arc.aspects' } },
   73: { hash: 73, displayProperties: { name: 'Spark of Ions' }, plug: { plugCategoryIdentifier: 'shared.arc.fragments' } },
+  81: { hash: 81, displayProperties: { name: 'Overload Bow' } },
+  82: { hash: 82, displayProperties: { name: 'Elemental Siphon' } },
+  83: { hash: 83, displayProperties: { name: 'Retired Perk' } },
 };
 
 vi.mock('../src/manifest.js', () => ({
@@ -29,10 +32,13 @@ vi.mock('../src/manifest.js', () => ({
       ? { displayProperties: { name: 'Set Perk', description: 'Two pieces do something.' } }
       : ITEMS[hash],
   defName: (_t: string, hash: number) => ITEMS[hash]?.displayProperties?.name ?? `#${hash}`,
-  eachDef: () => [{
-    hash: 900, displayProperties: { name: 'Testwear' }, setItems: [50],
-    setPerks: [{ requiredSetCount: 2, sandboxPerkHash: 901 }],
-  }],
+  eachDef: (table: string) => table === 'DestinyArtifactDefinition'
+    // Only the live artifact ships with tiers; retired ones are a name in the item table.
+    ? [{ hash: 800, displayProperties: { name: 'Live Artifact' }, tiers: [{ items: [{ itemHash: 81 }, { itemHash: 82 }] }] }]
+    : [{
+      hash: 900, displayProperties: { name: 'Testwear' }, setItems: [50],
+      setPerks: [{ requiredSetCount: 2, sandboxPerkHash: 901 }],
+    }],
 }));
 
 const { parseShareUrl, fetchDimLoadout, modsBySlot, describeLoadout, resetSetCache, DimShareError } =
@@ -95,6 +101,25 @@ describe('describeLoadout', () => {
   it('pulls the intrinsic off an exotic so the build explains itself', () => {
     const out: any = describeLoadout({ name: 'B', classType: 2, equipped: [{ id: '1', hash: 60 }] } as any);
     expect(out.armor[0].exoticPerk).toEqual({ name: 'Big Perk', description: 'Does the thing.' });
+  });
+
+  const withArtifact = (unlockedItemHashes: number[]) => describeLoadout({
+    name: 'B', classType: 2, equipped: [],
+    parameters: { artifactUnlocks: { seasonNumber: 28, unlockedItemHashes } },
+  } as any) as any;
+
+  it('names the artifact a build was saved on so the notes cannot be believed over it', () => {
+    expect(withArtifact([81, 82]).artifact).toEqual({
+      seasonPerDim: 28, name: 'Live Artifact', current: true, note: undefined,
+      perks: ['Overload Bow', 'Elemental Siphon'],
+    });
+  });
+
+  it('flags perks that are not all from the artifact in the game today', () => {
+    const a = withArtifact([81, 83]).artifact;
+    expect(a.current).toBe(false);
+    expect(a.name).toBeUndefined();
+    expect(a.note).toMatch(/Live Artifact.*1 of 2 still current/);
   });
 
   it('keeps the author notes verbatim rather than parsing gear out of them', () => {
