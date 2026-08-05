@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { catalogItems, itemDetail, itemHashesByName, type SocketColumn } from '../catalog.js';
-import { defName } from '../manifest.js';
+import { defName, getDef } from '../manifest.js';
+import { browseItems, FACET_VALUES } from '../lightgg.js';
 import { SEARCH_HELP, compileQuery, sortItems, statValue, type SearchItem } from '../search/index.js';
 import { rollsFor, wishlistMeta, wishlistReady } from '../wishlist.js';
 import { tool } from './util.js';
@@ -105,13 +106,52 @@ function godRollSummary(hash: number, columns: SocketColumn[], text: string | un
 export function registerCatalogTools(server: McpServer): void {
   server.registerTool('search_items', {
     description:
-      'Search EVERY item in the game (the whole Destiny manifest), not just the account\'s inventory — for designing builds around gear the player may not own. Same DIM query syntax as search_inventory: "is:handcannon is:legendary is:void", "is:exotic is:hunter is:helmet", "stat:range:>=70 is:pulserifle" with sort "stat:range". perk: and is:godroll here mean CAN ROLL it, since a catalog item has no fixed roll: "is:handcannon perk:\'explosive payload\'" finds every hand cannon whose pool contains it, and "is:sniperrifle is:godroll" every sniper with a community wish-listed roll. Stats are the definition\'s BASE values (no perks, no masterwork) — good for comparing frames, not finished rolls. Reissues of one weapon collapse into a single row carrying versions:N. Instance-only filters (power:, is:masterwork, is:locked, is:dupe) match nothing here — use search_inventory for those. Follow up with inspect_item on anything interesting.',
+      'Search EVERY item in the game (owned or not) — for designing builds around gear the player may not own. Two ways in, and you can use whichever fits:\n' +
+      '• light.gg facets (preferred — the light.gg item DB, always current): class, slot, rarity, ammo, breaker, foundry, season, craftable/enhanceable/deepsight/hasLore, and name (matched against item NAME and DESCRIPTION). e.g. {rarity:"exotic", ammo:"heavy"}, {foundry:"hakke", season:29}, {class:"warlock", slot:"helmet", rarity:"exotic"}, {name:"fatebringer"}. All facets AND together.\n' +
+      '• query (DIM syntax, routed to the local manifest) — use this for what facets CANNOT express: perk pools and stat thresholds. "is:handcannon perk:\'explosive payload\'" = every hand cannon whose pool CAN roll it; "stat:range:>=70 is:pulserifle" with sort "stat:range"; "is:sniperrifle is:godroll". perk:/is:godroll mean CAN ROLL, not "has".\n' +
+      'Prefer facets; reach for query when you need perk:/stat:/is:godroll. If both are given, query wins. Reissues of one weapon collapse into a single row with versions:N. Instance-only filters (power:, is:masterwork, is:dupe) match nothing here — use search_inventory. Follow up with inspect_item for the full item, or lightgg_rolls for community usage.',
     inputSchema: z.object({
-      query: z.string().describe(`DIM search query.\n${SEARCH_HELP}`),
-      sort: z.string().optional().describe('stat:<name> (e.g. stat:impact), or name.'),
+      query: z.string().optional().describe(`DIM query — for perk:/stat:/is:godroll and complex boolean filters.\n${SEARCH_HELP}`),
+      name: z.string().optional().describe('Name OR description text (light.gg).'),
+      class: z.enum(FACET_VALUES.class as unknown as [string, ...string[]]).optional(),
+      slot: z.enum(FACET_VALUES.slot as unknown as [string, ...string[]]).optional().describe('weapons|kinetic|energy|power|armor|helmet|gauntlets|chest|legs|class-item'),
+      rarity: z.enum(FACET_VALUES.rarity as unknown as [string, ...string[]]).optional(),
+      ammo: z.enum(FACET_VALUES.ammo as unknown as [string, ...string[]]).optional(),
+      breaker: z.enum(FACET_VALUES.breaker as unknown as [string, ...string[]]).optional(),
+      foundry: z.enum(FACET_VALUES.foundry as unknown as [string, ...string[]]).optional(),
+      season: z.number().int().min(1).max(29).optional(),
+      craftable: z.boolean().optional(),
+      enhanceable: z.boolean().optional(),
+      deepsight: z.boolean().optional(),
+      hasLore: z.boolean().optional(),
+      sort: z.string().optional().describe('query mode only: stat:<name> (e.g. stat:impact), or name.'),
       limit: z.number().int().min(1).transform((n) => Math.min(n, 100)).default(25),
     }),
-  }, tool(async ({ query, sort, limit }) => {
+  }, tool(async (a: any) => {
+    const { query, sort, limit } = a;
+    const facetKeys = ['name', 'class', 'slot', 'rarity', 'ammo', 'breaker', 'foundry', 'season', 'craftable', 'enhanceable', 'deepsight', 'hasLore'];
+    const hasFacets = facetKeys.some((k) => a[k] !== undefined);
+
+    // light.gg-first: facets go to light.gg unless a DIM query is given (perk:/stat: only the
+    // manifest can answer). query wins if both are present.
+    if (!query) {
+      if (!hasFacets) throw new Error('Pass a query (DIM syntax) or at least one facet (class, slot, rarity, name, …).');
+      const hashes = await browseItems(a);
+      // Reissues share a name across several hashes — collapse them like the query path does.
+      const seen = new Map<string, { name: string; hash: number; type?: string; tier?: string; versions?: number }>();
+      for (const h of hashes) {
+        const d = getDef('DestinyInventoryItemDefinition', h);
+        const name = d?.displayProperties?.name ?? `#${h}`;
+        const type = d?.itemTypeDisplayName || undefined;
+        const key = `${name}|${type}`;
+        const known = seen.get(key);
+        if (known) { known.versions = (known.versions ?? 1) + 1; continue; }
+        if (seen.size >= limit) continue;
+        seen.set(key, { name, hash: h, type, tier: d?.inventory?.tierTypeName || undefined });
+      }
+      return { source: 'light.gg', total: hashes.length, showing: seen.size, items: [...seen.values()] };
+    }
+
     const q = compileQuery(query);
     // Resolving every socket pool costs seconds, so only perk-aware queries pay for it.
     const items = catalogItems(q.usedPerks || q.usedGodroll);
@@ -128,6 +168,7 @@ export function registerCatalogTools(server: McpServer): void {
       seen.set(key, row(i, q.statsUsed, q.usedPerks || q.usedGodroll));
     }
     return {
+      source: 'manifest',
       total: hits.length,
       showing: seen.size,
       items: [...seen.values()],

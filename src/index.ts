@@ -15,6 +15,7 @@ import { registerProgressTools } from './tools/progress.js';
 import { registerBuildTools } from './tools/builds.js';
 import { registerCatalogTools } from './tools/catalog.js';
 import { registerDimTools } from './tools/dim.js';
+import { registerLightggTools } from './tools/lightgg.js';
 
 // ponytail: byte-count + JSONL append, no rotation. Add rotation if log outgrows the disk.
 function logCalls(body: unknown, bytes: number, ms: number) {
@@ -46,9 +47,41 @@ sort to get the highest few instead of a list to scan.
 Three different questions about gear, three different tools — mixing them up is the most
 common mistake:
 - "what do I have" -> search_inventory (the account; instance ids; power, masterwork, dupes)
-- "what exists in the game" -> search_items (every manifest item, same DIM syntax, no instances)
+- "what exists in the game" -> search_items (every item, owned or not; light.gg facets OR DIM query)
 - "everything about this one item" -> inspect_item (base stats, every perk each column can
   roll, and the community god rolls for it — works for gear the account has never seen)
+
+Two different god-roll signals, do not conflate them:
+- inspect_item = the curated DIM wish list (what reviewers say the roll SHOULD be, with notes).
+- lightgg_rolls = REAL usage from light.gg (how many players actually equip each perk). Use it for
+  min-maxing and for finding off-meta combos: perkColumns give each column's perks by usage %, and
+  traitCombos rank the two trait columns by pick count — top is the community god roll, the long tail
+  is the rare combo only dedicated players run (raise combos to mine it). lightgg_rolls takes a name
+  directly, so no separate name-to-hash step is needed.
+
+search_items is ONE tool with two ways in. Prefer light.gg FACETS (class, slot, rarity, ammo, breaker,
+foundry, season, craftable/enhanceable/deepsight/hasLore, and name = name-or-description text) — that
+is light.gg's own item DB and stays current: {rarity:"exotic", ammo:"heavy"}, {foundry:"hakke",
+season:29}, {class:"warlock", slot:"helmet", rarity:"exotic"}, {name:"fatebringer"}, all AND-ed. Use
+the query param (DIM syntax, manifest-backed) ONLY for what facets cannot express — perk pools and
+stat thresholds: "is:handcannon perk:'explosive payload'", "stat:range:>=70 is:pulserifle" with
+sort:"stat:range", "is:sniperrifle is:godroll". perk:/is:godroll mean CAN ROLL. If both a query and
+facets are passed, query wins. Instance filters (power:, is:masterwork, is:dupe) belong to
+search_inventory. Feed a hit into inspect_item for the full item or lightgg_rolls for community usage.
+
+"What's new", "new weapons this season", "new exotics in <expansion>" — new_items lists light.gg's
+New Items collections. Call it with no category first to see the current releases' collection slugs
+(they rotate each season), then again with a path like "renegades/new-weapons" for those items.
+
+"What loadouts do good players run in X", "popular Trials loadouts", "loadouts using Sunbracers in
+GMs" — browse_loadouts reads light.gg's Loadouts DB, real loadouts captured from actual runs (each a
+PGCR snapshot). Filter by class, subclass hash, mode (trials/competitive/strikes/any-pvp/any-pve/
+solo-lost-sectors), a specific activity/weapon/exotic-armor hash, season, and minScore/maxScore. It
+CANNOT sort by popularity — results are newest-first and most have 0 votes — so to surface skilled
+play, filter for it: a hard mode/activity PLUS a high minScore (the LLM sets the score bounds). Each
+card carries a loadout id; get_loadout returns that loadout's full gear (equipped weapons/armor with
+overrides, mods, stat targets, author notes, dim.gg export). Follow up with lightgg_rolls for a
+weapon's community god roll.
 
 Judging whether a weapon is good is not yours to guess: the community DIM wish list is indexed
 locally and both paths read it.
@@ -113,7 +146,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.13.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.18.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
@@ -121,6 +154,7 @@ function buildServer(): McpServer {
   registerBuildTools(server);
   registerCatalogTools(server);
   registerDimTools(server);
+  registerLightggTools(server);
   return server;
 }
 
