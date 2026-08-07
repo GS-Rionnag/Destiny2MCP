@@ -102,9 +102,9 @@ export function registerLightggTools(server: McpServer): void {
     return { category: a.category, totalHashes: hashes.length, uniqueShown: items.length, truncated: hashes.length > items.length || undefined, items, categories };
   }));
 
-  server.registerTool('browse_loadouts', {
+  server.registerTool('search_lightgg_builds', {
     description:
-      "Browse light.gg's Loadouts database — real loadouts auto-captured from players' actual runs (each is a snapshot of a real Post Game Carnage Report). Filter by class, subclass, activity mode, a specific weapon or exotic armor piece, season, and a MINIMUM performance score. Returns cards: title, activity, subclass, the run's score, upvotes, author and the loadout id — pass that id to get_loadout for the full gear. IMPORTANT on \"popular / skilled\": light.gg does NOT let you sort these — results are always newest-first and most have 0 votes, so you cannot ask for \"the most popular\". To surface skilled play, FILTER for it: pick a hard activity (mode:\"trials\"/\"competitive\", or an endgame activity by hash via activity) AND set a high minScore. That is the only lever. Mirrors light.gg's own loadout filters exactly.",
+      "BUILDS from light.gg — the second of the two build sources here, and the one to use for \"what are people actually running\", \"best builds on light.gg\", or any build question that names light.gg. Where search_builds returns builds someone wrote up and recommended (Mobalytics), these are real loadouts auto-captured from players' actual runs — each one a snapshot of a real Post Game Carnage Report, so it is evidence of what got used and how it performed, not advice. Consider both sources for \"what should I run\"; prefer this one when the ask is about real usage, a specific activity, or light.gg by name. Filter by class, subclass, activity mode, a specific weapon or exotic armor piece, season, and a MINIMUM performance score. Returns cards: title, activity, subclass, the run's score, upvotes, author and the build id — pass that id to get_lightgg_build for the full gear. IMPORTANT on \"popular / best / skilled\": light.gg does NOT let you sort these — results are always newest-first and most have 0 votes, so there is no \"top\" to ask for. To surface skilled play, FILTER for it: pick a hard activity (mode:\"trials\"/\"competitive\", or an endgame activity by hash via activity) AND set a high minScore. That is the only lever. Mirrors light.gg's own loadout filters exactly.",
     inputSchema: z.object({
       class: z.enum(['titan', 'hunter', 'warlock']).optional(),
       subclass: z.number().int().optional().describe('Subclass definition hash (e.g. 4282591831 = Prismatic Hunter). Resolve with get_definition/search_items.'),
@@ -140,10 +140,10 @@ export function registerLightggTools(server: McpServer): void {
     };
   }));
 
-  server.registerTool('get_loadout', {
+  server.registerTool('get_lightgg_build', {
     description:
-      "Full gear for one light.gg loadout, by the id from browse_loadouts. Returns the DIM loadout: class, subclass, equipped weapons and armor (resolved to names) with any perk/aspect/fragment overrides, the mods, stat targets, the author's notes, and a dim.gg-importable export URL. Because these are captured from a real run, equipped gear is exact item hashes; some perk detail may be sparse. For the community god roll of any weapon in it, follow up with lightgg_rolls.",
-    inputSchema: z.object({ id: z.number().int().describe('Loadout id from browse_loadouts.') }),
+      "Full gear for one light.gg build, by the id from search_lightgg_builds. Returns class, subclass, equipped weapons and armor (resolved to names) with any perk/aspect/fragment overrides, the mods, stat targets, the author's notes, and a dim.gg-importable export URL. Because these are captured from a real run, equipped gear is exact item hashes; some perk detail may be sparse. For the community god roll of any weapon in it, follow up with lightgg_rolls. Not to be confused with get_loadouts, which reads the player's own in-game loadout slots.",
+    inputSchema: z.object({ id: z.number().int().describe('Build id from search_lightgg_builds.') }),
   }, tool(async (a: { id: number }) => {
     const d = await getLoadout(a.id);
     const gear = (list?: { hash: number; socketOverrides?: Record<string, number> }[]) =>

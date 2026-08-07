@@ -327,7 +327,7 @@ slice to the next real `"`, `decodeURIComponent(x.replace(/\+/g,' '))`, brace-ba
 
 `equipped` hashes resolve to weapon/armor names via the manifest; the subclass item's
 `socketOverrides` are its super/abilities/aspects/fragments. Gear is exact (it is a real
-run), but random-roll perk detail can be sparse. This is `browse_loadouts` + `get_loadout`.
+run), but random-roll perk detail can be sparse. This is `search_lightgg_builds` + `get_lightgg_build`.
 
 ### 5. HTML fallback (no decryption, if the key ever breaks)
 

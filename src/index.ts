@@ -73,15 +73,27 @@ search_inventory. Feed a hit into inspect_item for the full item or lightgg_roll
 New Items collections. Call it with no category first to see the current releases' collection slugs
 (they rotate each season), then again with a path like "renegades/new-weapons" for those items.
 
-"What loadouts do good players run in X", "popular Trials loadouts", "loadouts using Sunbracers in
-GMs" — browse_loadouts reads light.gg's Loadouts DB, real loadouts captured from actual runs (each a
-PGCR snapshot). Filter by class, subclass hash, mode (trials/competitive/strikes/any-pvp/any-pve/
-solo-lost-sectors), a specific activity/weapon/exotic-armor hash, season, and minScore/maxScore. It
-CANNOT sort by popularity — results are newest-first and most have 0 votes — so to surface skilled
-play, filter for it: a hard mode/activity PLUS a high minScore (the LLM sets the score bounds). Each
-card carries a loadout id; get_loadout returns that loadout's full gear (equipped weapons/armor with
-overrides, mods, stat targets, author notes, dim.gg export). Follow up with lightgg_rolls for a
-weapon's community god roll.
+THERE ARE TWO BUILD SOURCES AND THEY ANSWER DIFFERENT QUESTIONS. A build question is not
+automatically search_builds — decide which evidence the ask wants, and when it wants both, run both:
+- search_builds / get_build (Mobalytics) = builds someone WROTE UP and recommends, with a guide,
+  stat priority and strengths/weaknesses. Sortable by trending/top/featured. Use for "what build
+  should I run", "best Prismatic Titan build", a build to learn and copy.
+- search_lightgg_builds / get_lightgg_build (light.gg) = builds people ACTUALLY RAN, auto-captured
+  from real Post Game Carnage Reports, each with the run's score. Evidence, not advice. Use for
+  "what are people actually running", "what do good players run in X", "builds using Sunbracers in
+  GMs", anything tied to a specific activity, and anything that says light.gg.
+Naming light.gg in the ask always means search_lightgg_builds, even when the word used is "builds".
+
+search_lightgg_builds filters by class, subclass hash, mode (trials/competitive/strikes/any-pvp/
+any-pve/solo-lost-sectors), a specific activity/weapon/exotic-armor hash, season, and minScore/
+maxScore. It CANNOT sort by popularity — results are newest-first and most have 0 votes — so there
+is no "top" or "best" to request: filter for skill instead, a hard mode/activity PLUS a high
+minScore (you pick the score bounds). Each card carries a build id; get_lightgg_build returns that
+build's full gear (equipped weapons/armor with overrides, mods, stat targets, author notes, dim.gg
+export). Follow up with lightgg_rolls for a weapon's community god roll.
+
+get_lightgg_build is a community build. get_loadouts is the player's own in-game loadout slots.
+Similar names, unrelated tools.
 
 Judging whether a weapon is good is not yours to guess: the community DIM wish list is indexed
 locally and both paths read it.
@@ -116,11 +128,12 @@ For a recurring or scheduled check ("tell me what dropped"), use get_new_items, 
 search_inventory with sort:recent. get_new_items keeps a watermark on the server, so it
 reports each drop exactly once even though the run that calls it remembers nothing.
 
-"What build should I run", "best Prismatic Titan build", "builds that use Sunbracers" — that is
-search_builds, which reads the Mobalytics community/meta build database, NOT the player's account.
-It returns preview cards (subclass, super, abilities, aspects, weapons + perks, exotic armor, tags);
-get_build then returns that build's full loadout, mods, stat priority, written guide, DIM link and
-video guide. Do not describe a build from memory when these two calls have the current one.
+"What build should I run", "best Prismatic Titan build", "builds that use Sunbracers" — search_builds
+reads the Mobalytics community/meta build database, NOT the player's account. It returns preview
+cards (subclass, super, abilities, aspects, weapons + perks, exotic armor, tags); get_build then
+returns that build's full loadout, mods, stat priority, written guide, DIM link and video guide. Do
+not describe a build from memory when these two calls have the current one. Check the two-build-
+sources rule above first — search_lightgg_builds answers a real-usage question that this cannot.
 
 For "what should I do today", "what are my ranks" or "did I do my weekly", use get_progress.
 get_milestones only knows the PUBLIC weekly reset list — it cannot tell you what THIS account
@@ -146,7 +159,7 @@ and any write clears the cache.`;
 
 function buildServer(): McpServer {
   // Bump on any tool-schema change — some clients cache the tool list and key it on version.
-  const server = new McpServer({ name: 'destiny2', version: '1.18.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'destiny2', version: '1.19.0' }, { instructions: INSTRUCTIONS });
   registerReadTools(server);
   registerWriteTools(server);
   registerRawTool(server);
