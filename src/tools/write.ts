@@ -49,6 +49,35 @@ async function post(path: string, body: Record<string, unknown>) {
   return bungieFetch(path, { method: 'POST', auth: true, body: { ...body, membershipType: a.membershipType } });
 }
 
+const LOCATION: Record<number, string> = { 0: 'unknown', 1: 'character', 2: 'vault', 3: 'vendor', 4: 'postmaster' };
+
+/** A write returning ErrorCode 1 only means Bungie accepted it — re-read the item so callers get
+ * observed state instead of an assumption they then have to trust blind. */
+async function itemState(itemId: string) {
+  const a = await getAccount();
+  const r = await bungieFetch<any>(`/Destiny2/${a.membershipType}/Profile/${a.membershipId}/Item/${itemId}/`, {
+    auth: true, query: { components: '300' },
+  });
+  const d = r.item?.data ?? {};
+  return {
+    location: LOCATION[d.location] ?? `unknown(${d.location})`,
+    // Only set while the item sits on a character; absent in the vault.
+    characterId: r.characterId as string | undefined,
+    equipped: !!(d.transferStatus & 1), // DestinyItemTransferStatus.ItemIsEquipped
+  };
+}
+
+/** The write already succeeded, so a failed re-read is reported, never thrown. */
+async function observe(itemId: string, expected: (s: Awaited<ReturnType<typeof itemState>>) => boolean) {
+  try {
+    const state = await itemState(itemId);
+    return { ...state, confirmed: expected(state) };
+  } catch (e: any) {
+    const detail = e instanceof BungieError ? `${e.errorStatus}: ${e.message}` : `${e?.message ?? e}`;
+    return { confirmed: false, note: `Write accepted but re-read failed (${detail}) — verify with search_inventory before acting on it.` };
+  }
+}
+
 const plugSchema = z.object({ socket_index: z.number().int().min(0), plug: z.string() });
 
 // One failing socket must not abandon the rest of the loadout — report per plug instead.
@@ -84,7 +113,7 @@ async function insertPlugs(itemId: string, characterId: string, plugs: z.infer<t
 
 export function registerWriteTools(server: McpServer): void {
   server.registerTool('transfer_item', {
-    description: 'Move an item between a character and the vault. Get item_instance_id + item_hash from search_inventory. To move char→char: transfer to vault first, then vault→other char.',
+    description: 'Move an item between a character and the vault. Get item_instance_id + item_hash from search_inventory. To move char→char: transfer to vault first, then vault→other char. Returns the item\'s re-read location — treat confirmed:false as "the item did not move", do not chain an equip onto it.',
     inputSchema: z.object({
       item_instance_id: z.string(),
       item_hash: z.number().int(),
@@ -97,15 +126,20 @@ export function registerWriteTools(server: McpServer): void {
       itemReferenceHash: item_hash, stackSize: stack_size, transferToVault: to_vault,
       itemId: item_instance_id, characterId: character_id,
     });
-    return `Transferred ${defName('DestinyInventoryItemDefinition', item_hash)} ${to_vault ? 'to vault' : 'to character'}.`;
+    return {
+      item: defName('DestinyInventoryItemDefinition', item_hash),
+      requested: to_vault ? 'to vault' : `to character ${character_id}`,
+      ...await observe(item_instance_id, (s) =>
+        to_vault ? s.location === 'vault' : s.characterId === character_id),
+    };
   }));
 
   server.registerTool('equip_item', {
-    description: 'Equip one item on a character. Only works in orbit/social spaces or offline (Bungie restriction).',
+    description: 'Equip one item on a character. Only works in orbit/social spaces or offline (Bungie restriction). Returns the item\'s re-read state — confirmed:false means it is not equipped.',
     inputSchema: z.object({ item_instance_id: z.string(), character_id: z.string() }),
   }, tool(async ({ item_instance_id, character_id }) => {
     await post(`${ACTIONS}/Items/EquipItem/`, { itemId: item_instance_id, characterId: character_id });
-    return 'Equipped.';
+    return observe(item_instance_id, (s) => s.equipped && s.characterId === character_id);
   }));
 
   server.registerTool('equip_items', {

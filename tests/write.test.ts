@@ -29,7 +29,8 @@ function capture() {
 }
 
 // braces matter: mockClear() returns the mock, and vitest calls a function returned from beforeEach as a cleanup hook
-beforeEach(() => { vi.mocked(bungieFetch).mockClear(); });
+// also restore the default impl so a test that stubs responses cannot leak into the next one
+beforeEach(() => { vi.mocked(bungieFetch).mockClear().mockImplementation(async () => ({}) as any); });
 
 describe('write tools', () => {
   it('transfer_item posts correct body', async () => {
@@ -40,6 +41,43 @@ describe('write tools', () => {
       method: 'POST', auth: true,
       body: { itemReferenceHash: 999, stackSize: 1, transferToVault: true, itemId: 'IID', characterId: 'C1', membershipType: 3 },
     });
+  });
+
+  it('transfer_item reports the re-read location, not an assumed success', async () => {
+    // item still sits in the vault (location 2) after the write was accepted
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) =>
+      (path.includes('/Item/') ? { item: { data: { location: 2, transferStatus: 0 } } } : {}) as any);
+    const res = await capture().transfer_item({
+      item_instance_id: 'IID', item_hash: 999, character_id: 'C1', to_vault: false, stack_size: 1,
+    });
+    const out = JSON.parse(res.content[0].text);
+    expect(out).toMatchObject({ location: 'vault', confirmed: false });
+
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) =>
+      (path.includes('/Item/')
+        ? { characterId: 'C1', item: { data: { location: 1, transferStatus: 0 } } }
+        : {}) as any);
+    const ok = await capture().transfer_item({
+      item_instance_id: 'IID', item_hash: 999, character_id: 'C1', to_vault: false, stack_size: 1,
+    });
+    expect(JSON.parse(ok.content[0].text)).toMatchObject({ location: 'character', confirmed: true });
+  });
+
+  it('equip_item confirms from transferStatus, and a failed re-read is reported not thrown', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) =>
+      (path.includes('/Item/')
+        ? { characterId: 'C1', item: { data: { location: 1, transferStatus: 1 } } }
+        : {}) as any);
+    const res = await capture().equip_item({ item_instance_id: 'IID', character_id: 'C1' });
+    expect(JSON.parse(res.content[0].text)).toMatchObject({ equipped: true, confirmed: true });
+
+    vi.mocked(bungieFetch).mockImplementation(async (path: string) => {
+      if (path.includes('/Item/')) throw new Error('connector gone');
+      return {} as any;
+    });
+    const dead = await capture().equip_item({ item_instance_id: 'IID', character_id: 'C1' });
+    expect(dead.isError).toBeUndefined();
+    expect(JSON.parse(dead.content[0].text)).toMatchObject({ confirmed: false });
   });
 
   it('insert_plug resolves plug names and sockets every plug in one call', async () => {
@@ -148,6 +186,8 @@ describe('write tools', () => {
   });
 
   it('rename_loadout rejects a name that is not on the in-game list, and lists the real ones', async () => {
+    vi.mocked(bungieFetch).mockImplementation(async () =>
+      ({ characterLoadouts: { data: { C1: { loadouts: [{ nameHash: 1 }] } } } }) as any);
     const res = await capture().rename_loadout({ loadout_index: 0, character_id: 'C1', name: 'Boss DPS' });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/Raid, PvP/);

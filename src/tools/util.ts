@@ -27,7 +27,8 @@ export const tool =
     try {
       return ok(await fn(args));
     } catch (e: any) {
-      const msg = e instanceof BungieError ? `${e.errorStatus}: ${e.message}` : String(e?.message ?? e);
+      // numeric code included so a caller can tell a Bungie refusal from a transport failure
+      const msg = e instanceof BungieError ? `${e.errorStatus} (${e.errorCode}): ${e.message}` : String(e?.message ?? e);
       return { content: [{ type: 'text', text: `Error — ${msg}` }], isError: true };
     }
   };
